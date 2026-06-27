@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="es" data-tema="claro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Walletera, tu dinero bajo control. Aplicación de control financiero familiar con fondo mensual, categorías y estadísticas.">
+    <meta name="theme-color" content="#6C5CE7" id="metaThemeColor">
+    <meta property="og:title" content="Walletera">
+    <meta property="og:description" content="Tu dinero bajo control">
+    <meta property="og:type" content="website">
+    <title>Walletera | Tu dinero bajo control</title>
+    <link rel="icon" type="image/svg+xml" href="./img/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap">
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.2/src/regular/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+    <link rel="stylesheet" href="./css/estilos.css">
+    <script defer src="./js/datos.js"></script>
+    <script defer src="./main.js"></script>
+</head>
+<body>
+    <header class="cabecera">
+        <div class="contenedor cabecera-contenido">
+            <div class="marca">
+                <img src="img/logo.svg" alt="Logo de Walletera" class="logo">
+                <div class="marca-texto">
+                    <h1>Walletera</h1>
+                    <span class="slogan">Tu dinero bajo control</span>
+                </div>
+            </div>
+            <button class="btn-tema" id="btnTema" type="button" aria-label="Cambiar tema claro u oscuro">
+                <i class="ph ph-sun icono-sol" aria-hidden="true"></i>
+                <i class="ph ph-moon icono-luna" aria-hidden="true"></i>
+            </button>
+        </div>
+    </header>
+    <nav class="navegacion" aria-label="Navegación principal">
+        <div class="contenedor nav-contenido">
+            <button class="nav-btn activa" data-seccion="inicio" aria-label="Ir a Inicio" aria-current="page">
+                <span class="nav-icono"><i class="ph ph-house" aria-hidden="true"></i></span>
+                <span class="nav-texto">Inicio</span>
+            </button>
+            <button class="nav-btn" data-seccion="categorias" aria-label="Ir a Categorías">
+                <span class="nav-icono"><i class="ph ph-squares-four" aria-hidden="true"></i></span>
+                <span class="nav-texto">Categorías</span>
+            </button>
+            <button class="nav-btn" data-seccion="movimientos" aria-label="Ir a Movimientos">
+                <span class="nav-icono"><i class="ph ph-arrows-left-right" aria-hidden="true"></i></span>
+                <span class="nav-texto">Movimientos</span>
+            </button>
+            <button class="nav-btn" data-seccion="estadisticas" aria-label="Ir a Estadísticas">
+                <span class="nav-icono"><i class="ph ph-chart-pie-slice" aria-hidden="true"></i></span>
+                <span class="nav-texto">Estadísticas</span>
+            </button>
+        </div>
+    </nav>
+    <main class="contenedor principal">
+        <section class="seccion activa" id="inicio">
+            <div class="seccion-encabezado">
+                <h2>Inicio</h2>
+                <p class="seccion-descripcion">Resumen general de tu economía mensual.</p>
+            </div>
+            <div class="tarjeta-saldo">
+                <span class="tarjeta-saldo-label">Saldo disponible</span>
+                <p class="tarjeta-saldo-monto num" id="saldoDisponible">$0</p>
+                <div class="tarjeta-saldo-detalle">
+                    <div>
+                        <span class="detalle-label">Fondo mensual</span>
+                        <span class="detalle-valor num" id="fondoMensual">$0</span>
+                    </div>
+                    <div>
+                        <span class="detalle-label">Total gastado</span>
+                        <span class="detalle-valor num" id="totalGastado">$0</span>
+                    </div>
+                </div>
+                <button class="btn btn-claro" id="btnEditarFondo" type="button">
+                    <i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar fondo mensual
+                </button>
+            </div>
+            <div class="grid-mini">
+                <div class="card">
+                    <span class="card-label">Movimientos</span>
+                    <p class="card-valor num" id="cantidadMovimientos">0</p>
+                </div>
+                <div class="card">
+                    <span class="card-label">% Utilizado</span>
+                    <p class="card-valor num" id="porcentajeUtilizado">0%</p>
+                </div>
+            </div>
+            <div class="bloque">
+                <div class="bloque-encabezado">
+                    <h3>Últimos movimientos</h3>
+                    <button class="btn-link" data-seccion="movimientos" type="button">Ver todos</button>
+                </div>
+                <ul class="lista-movimientos" id="ultimosMovimientos"></ul>
+            </div>
+            <div class="bloque">
+                <div class="bloque-encabezado">
+                    <h3>Resumen de categorías</h3>
+                    <button class="btn-link" data-seccion="categorias" type="button">Ver todas</button>
+                </div>
+                <ul class="lista-categorias-mini" id="resumenCategorias"></ul>
+            </div>
+        </section>
+        <section class="seccion" id="categorias">
+            <div class="seccion-encabezado">
+                <h2>Categorías</h2>
+                <p class="seccion-descripcion">Organizá tu presupuesto por rubro.</p>
+            </div>
+            <button class="btn btn-primario btn-bloque" id="btnNuevaCategoria" type="button">
+                <i class="ph ph-plus" aria-hidden="true"></i> Nueva categoría
+            </button>
+            <ul class="lista-categorias" id="listaCategorias"></ul>
+        </section>
+        <section class="seccion" id="movimientos">
+            <div class="seccion-encabezado">
+                <h2>Movimientos</h2>
+                <p class="seccion-descripcion">Tu historial de ingresos y gastos.</p>
+            </div>
+            <div class="barra-buscador">
+                <i class="ph ph-magnifying-glass icono-buscar" aria-hidden="true"></i>
+                <input type="search" id="buscador" placeholder="Buscar por descripción..." aria-label="Buscar movimientos">
+            </div>
+            <div class="filtros" role="tablist" aria-label="Filtrar por tipo">
+                <button class="filtro-btn activa" data-filtro="todos" type="button">Todos</button>
+                <button class="filtro-btn" data-filtro="ingreso" type="button">Ingresos</button>
+                <button class="filtro-btn" data-filtro="gasto" type="button">Gastos</button>
+            </div>
+            <ul class="lista-movimientos" id="listaMovimientos"></ul>
+        </section>
+        <section class="seccion" id="estadisticas">
+            <div class="seccion-encabezado">
+                <h2>Estadísticas</h2>
+                <p class="seccion-descripcion">Cómo se mueve tu dinero este mes.</p>
+            </div>
+            <div class="grid-stats">
+                <div class="card">
+                    <span class="card-label">Categoría más gastada</span>
+                    <p class="card-valor" id="statCategoriaTop">Sin datos</p>
+                </div>
+                <div class="card">
+                    <span class="card-label">Total gastado</span>
+                    <p class="card-valor num" id="statTotalGastado">$0</p>
+                </div>
+                <div class="card">
+                    <span class="card-label">Promedio diario</span>
+                    <p class="card-valor num" id="statPromedioDiario">$0</p>
+                </div>
+                <div class="card">
+                    <span class="card-label">Cantidad de movimientos</span>
+                    <p class="card-valor num" id="statCantidadMovimientos">0</p>
+                </div>
+                <div class="card">
+                    <span class="card-label">% Consumido</span>
+                    <p class="card-valor num" id="statPorcentajeConsumido">0%</p>
+                </div>
+            </div>
+            <div class="bloque">
+                <h3>Gasto por categoría</h3>
+                <div class="canvas-contenedor">
+                    <canvas id="graficoCategorias" aria-label="Gráfico de gastos por categoría"></canvas>
+                </div>
+            </div>
+        </section>
+    </main>
+    <button class="btn-flotante" id="btnNuevoMovimiento" type="button" aria-label="Nuevo movimiento">
+        <i class="ph ph-plus" aria-hidden="true"></i>
+    </button>
+    <div class="modal" id="modalCategoria" aria-hidden="true">
+        <div class="modal-fondo" data-cerrar="modalCategoria"></div>
+        <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="tituloModalCategoria">
+            <header class="modal-encabezado">
+                <h3 id="tituloModalCategoria">Nueva categoría</h3>
+                <button class="modal-cerrar" type="button" data-cerrar="modalCategoria" aria-label="Cerrar">
+                    <i class="ph ph-x" aria-hidden="true"></i>
+                </button>
+            </header>
+            <form class="formulario" id="formCategoria">
+                <input type="hidden" id="categoriaId">
+                <input type="hidden" id="categoriaIcono">
+                <label class="campo">
+                    <span>Nombre</span>
+                    <input type="text" id="categoriaNombre" placeholder="Ej: Alimentación" required>
+                </label>
+                <label class="campo">
+                    <span>Presupuesto</span>
+                    <input type="number" id="categoriaPresupuesto" placeholder="0" min="0" step="100" required>
+                </label>
+                <div class="campo">
+                    <span>Icono</span>
+                    <div class="selector-emojis" id="selectorEmojis" role="radiogroup" aria-label="Elegí un ícono"></div>
+                </div>
+                <div class="formulario-acciones">
+                    <button class="btn btn-secundario" type="button" data-cerrar="modalCategoria">Cancelar</button>
+                    <button class="btn btn-primario" type="submit">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div class="modal" id="modalMovimiento" aria-hidden="true">
+        <div class="modal-fondo" data-cerrar="modalMovimiento"></div>
+        <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="tituloModalMovimiento">
+            <header class="modal-encabezado">
+                <h3 id="tituloModalMovimiento">Nuevo movimiento</h3>
+                <button class="modal-cerrar" type="button" data-cerrar="modalMovimiento" aria-label="Cerrar">
+                    <i class="ph ph-x" aria-hidden="true"></i>
+                </button>
+            </header>
+            <form class="formulario" id="formMovimiento">
+                <input type="hidden" id="movimientoId">
+                <div class="toggle-tipo">
+                    <button type="button" class="toggle-btn activa" data-tipo="gasto">Gasto</button>
+                    <button type="button" class="toggle-btn" data-tipo="ingreso">Ingreso</button>
+                </div>
+                <input type="hidden" id="movimientoTipo" value="gasto">
+                <label class="campo">
+                    <span>Descripción</span>
+                    <input type="text" id="movimientoDescripcion" placeholder="Ej: Compra supermercado" required>
+                </label>
+                <label class="campo">
+                    <span>Monto</span>
+                    <input type="number" id="movimientoMonto" placeholder="0" min="0" step="100" required>
+                </label>
+                <label class="campo">
+                    <span>Categoría</span>
+                    <select id="movimientoCategoria" required></select>
+                </label>
+                <label class="campo">
+                    <span>Fecha</span>
+                    <input type="date" id="movimientoFecha" required>
+                </label>
+                <div class="formulario-acciones">
+                    <button class="btn btn-secundario" type="button" data-cerrar="modalMovimiento">Cancelar</button>
+                    <button class="btn btn-primario" type="submit">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+    <defs>
+        <linearGradient id="gradWalletera" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#8B7EF0"/>
+            <stop offset="100%" stop-color="#6C5CE7"/>
+        </linearGradient>
+    </defs>
+    <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#gradWalletera)"/>
+    <path d="M14 22 C14 19 16 17 19 17 L45 17 C48 17 50 19 50 22 L50 44 C50 47 48 49 45 49 L19 49 C16 49 14 47 14 44 Z"
+          fill="#FFFFFF" opacity="0.95"/>
+    <path d="M14 22 C14 19 16 17 19 17 L45 17 C48 17 50 19 50 22 L50 26 L14 26 Z"
+          fill="#FFFFFF" opacity="0.6"/>
+    <circle cx="42" cy="35" r="4" fill="#6C5CE7"/>
+    <circle cx="42" cy="35" r="1.5" fill="#00C896"/>
+    <text x="22" y="40" font-family="Manrope, Arial, sans-serif" font-weight="800" font-size="14" fill="#6C5CE7">$</text>
+</svg>

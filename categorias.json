@@ -1,0 +1,12 @@
+[
+    { "nombre": "Alimentación",    "icono": "🍔", "presupuesto": 150000 },
+    { "nombre": "Transporte",      "icono": "🚗", "presupuesto": 50000  },
+    { "nombre": "Vivienda",        "icono": "🏠", "presupuesto": 200000 },
+    { "nombre": "Salud",           "icono": "💊", "presupuesto": 40000  },
+    { "nombre": "Educación",       "icono": "📚", "presupuesto": 30000  },
+    { "nombre": "Entretenimiento", "icono": "🎬", "presupuesto": 25000  },
+    { "nombre": "Servicios",       "icono": "💡", "presupuesto": 60000  },
+    { "nombre": "Indumentaria",    "icono": "👕", "presupuesto": 35000  },
+    { "nombre": "Mascotas",        "icono": "🐶", "presupuesto": 20000  },
+    { "nombre": "Ahorro",          "icono": "💰", "presupuesto": 100000 }
+]

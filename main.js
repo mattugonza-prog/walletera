@@ -1,18 +1,18 @@
 // ===== Walletera | main.js =====
-// Capa de presentación: DOM, eventos, render y librerías externas.
+// Capa de presentación: DOM, eventos y render.
 import {
-    TIPOS_CUENTA,
+    TIPOS_CUENTA, COLORES_CATEGORIA,
     inicializarDatos,
     obtenerGruposIconos, primerIcono,
     obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
     contarMovimientosDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
     obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria,
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
-    buscarYFiltrar,
+    buscarYFiltrar, agruparPorDia,
     periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
     calcularResumen, calcularPromedioDiario, calcularVariacionGastos,
     obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
-    formatearMoneda, formatearFecha
+    formatearMoneda, etiquetaDia
 } from './js/datos.js';
 
 // ===== Estado de UI =====
@@ -21,97 +21,126 @@ let filtroActual = 'todos';
 let busquedaActual = '';
 let tipoCategoriaActual = 'gasto';
 let graficoCategorias = null;
-let focoPrevio = null;
+let resolverConfirmacion = null;
+const modalesAbiertos = [];
 
 const CLAVE_TEMA = 'walletera_tema';
-
-// Paleta categórica cohesiva (derivada de la marca)
-const PALETA_GRAFICO = [
-    'oklch(0.62 0.19 280)', 'oklch(0.66 0.16 250)', 'oklch(0.70 0.14 215)',
-    'oklch(0.72 0.14 180)', 'oklch(0.72 0.15 150)', 'oklch(0.78 0.15 110)',
-    'oklch(0.80 0.15 80)',  'oklch(0.72 0.16 45)',  'oklch(0.66 0.18 20)',
-    'oklch(0.62 0.16 335)'
-];
-const COLOR_SIN_CATEGORIA = 'oklch(0.70 0.01 280)';
+const CLAVE_OCULTAR = 'walletera_ocultar_montos';
+const COLOR_META = { oscuro: '#0D0E11', claro: '#F4F5F2' };
+const FUENTE = "'Inter Tight', system-ui, sans-serif";
+const NOMBRES_COLOR = {
+    naranja: 'Naranja', azul: 'Azul', rosa: 'Rosa', verde: 'Verde',
+    violeta: 'Violeta', amarillo: 'Amarillo', turquesa: 'Turquesa', gris: 'Gris'
+};
 
 // Todo texto que viene del usuario o del almacenamiento pasa por acá antes de ir a innerHTML.
 const ENTIDADES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = valor => String(valor).replace(/[&<>"']/g, c => ENTIDADES[c]);
 
 const $ = id => document.getElementById(id);
+const guardarPreferencia = (clave, valor) => { try { localStorage.setItem(clave, valor); } catch { /* sin almacenamiento */ } };
 
 // ===== Inicio =====
 iniciar();
 
 async function iniciar() {
     configurarTema();
+    configurarPrivacidad();
     mostrarSkeletons();
     await inicializarDatos();
-    configurarNavegacion();
-    configurarPeriodo();
+    configurarClicsGlobales();
     configurarModales();
-    configurarListas();
+    configurarConfirmacion();
+    configurarFormularioMovimiento();
     configurarFormularioCuenta();
     configurarFormularioCategoria();
-    configurarFormularioMovimiento();
     configurarBuscadorYFiltros();
-    configurarBotones();
     renderizarTodo();
 }
 
 function renderizarTodo() {
     renderizarPeriodo();
-    renderizarDashboard();
-    renderizarCuentas();
-    renderizarCategorias();
+    renderizarInicio();
     renderizarMovimientos();
-    renderizarEstadisticas();
-    if ($('estadisticas').classList.contains('activa')) renderizarGrafico();
+    renderizarCuentas();
+    renderizarPresupuestos();
+    renderizarAnalisis();
+    if ($('analisis').classList.contains('activa')) renderizarGrafico();
 }
 
-// ===== Tema =====
-// El atributo data-tema ya lo fija el script inline del <head> para evitar parpadeo.
+// ===== Formato =====
+const formatearPorcentaje = valor =>
+    `${valor.toLocaleString('es-AR', { maximumFractionDigits: 1 })} %`;
+
+function formatearConSigno(monto) {
+    if (monto > 0) return `+\u00a0${formatearMoneda(monto)}`;
+    return formatearMoneda(monto);
+}
+
+const nombreMes = p => nombrePeriodo(p).split(' ')[0];
+
+// ===== Tema y privacidad =====
 function configurarTema() {
-    aplicarTema(document.documentElement.getAttribute('data-tema') || 'claro');
-    $('btnTema').addEventListener('click', () => {
-        const actual = document.documentElement.getAttribute('data-tema');
-        aplicarTema(actual === 'oscuro' ? 'claro' : 'oscuro');
-    });
+    aplicarTema(document.documentElement.getAttribute('data-tema'));
 }
 
 function aplicarTema(tema) {
-    document.documentElement.setAttribute('data-tema', tema);
-    try { localStorage.setItem(CLAVE_TEMA, tema); } catch { /* sin almacenamiento */ }
-    $('metaThemeColor')?.setAttribute('content', tema === 'oscuro' ? '#221d31' : '#6C5CE7');
+    const valor = tema === 'claro' ? 'claro' : 'oscuro';
+    const otro = valor === 'claro' ? 'oscuro' : 'claro';
+    document.documentElement.setAttribute('data-tema', valor);
+    guardarPreferencia(CLAVE_TEMA, valor);
+    $('metaThemeColor')?.setAttribute('content', COLOR_META[valor]);
+    document.querySelectorAll('[data-alternar-tema]').forEach(btn => btn.setAttribute('aria-label', `Cambiar a modo ${otro}`));
+    document.querySelectorAll('.texto-tema').forEach(el => { el.textContent = `Modo ${otro}`; });
     if (graficoCategorias) renderizarGrafico();
 }
 
-// ===== Navegación SPA =====
-function configurarNavegacion() {
-    document.querySelectorAll('[data-seccion]').forEach(btn => {
-        btn.addEventListener('click', () => irASeccion(btn.dataset.seccion));
+function configurarPrivacidad() {
+    const btn = $('btnOcultarMontos');
+    const actualizar = () => {
+        const oculto = document.documentElement.classList.contains('ocultar-montos');
+        btn.setAttribute('aria-pressed', String(oculto));
+        btn.setAttribute('aria-label', oculto ? 'Mostrar montos' : 'Ocultar montos');
+    };
+    btn.addEventListener('click', () => {
+        const oculto = document.documentElement.classList.toggle('ocultar-montos');
+        guardarPreferencia(CLAVE_OCULTAR, oculto ? '1' : '0');
+        actualizar();
+    });
+    actualizar();
+}
+
+// ===== Clics globales (delegación) =====
+// Botones que se crean al renderizar también navegan, abren modales o editan.
+function configurarClicsGlobales() {
+    document.addEventListener('click', e => {
+        const objetivo = e.target.closest('[data-seccion], [data-nuevo-movimiento], [data-alternar-tema], [data-periodo], [data-editar-movimiento], [data-editar-cuenta], [data-editar-categoria]');
+        if (!objetivo) return;
+        const d = objetivo.dataset;
+        if (d.seccion) irASeccion(d.seccion);
+        else if (d.nuevoMovimiento) abrirModalMovimiento(null, d.nuevoMovimiento);
+        else if ('alternarTema' in d) aplicarTema(document.documentElement.getAttribute('data-tema') === 'oscuro' ? 'claro' : 'oscuro');
+        else if (d.periodo) cambiarPeriodo(Number(d.periodo));
+        else if (d.editarMovimiento) abrirModalMovimiento(d.editarMovimiento);
+        else if (d.editarCuenta) abrirModalCuenta(d.editarCuenta);
+        else if (d.editarCategoria) abrirModalCategoria(d.editarCategoria);
     });
 }
 
+// ===== Navegación =====
 function irASeccion(idSeccion) {
     document.querySelectorAll('.seccion').forEach(s => s.classList.toggle('activa', s.id === idSeccion));
-    document.querySelectorAll('.nav-btn').forEach(b => {
+    document.querySelectorAll('.nav-item[data-seccion], .nav-tab').forEach(b => {
         const activa = b.dataset.seccion === idSeccion;
         b.classList.toggle('activa', activa);
         if (activa) b.setAttribute('aria-current', 'page');
         else b.removeAttribute('aria-current');
     });
-    // Los saldos de cuentas son acumulados: el selector de mes no aplica ahí.
-    $('selectorPeriodo').hidden = idSeccion === 'cuentas';
-    if (idSeccion === 'estadisticas') renderizarGrafico();
+    window.scrollTo({ top: 0 });
+    if (idSeccion === 'analisis') renderizarGrafico();
 }
 
-// ===== Selector de período =====
-function configurarPeriodo() {
-    $('btnPeriodoAnterior').addEventListener('click', () => cambiarPeriodo(-1));
-    $('btnPeriodoSiguiente').addEventListener('click', () => cambiarPeriodo(1));
-}
-
+// ===== Período =====
 function cambiarPeriodo(meses) {
     const nuevo = desplazarPeriodo(periodo, meses);
     if (nuevo > periodoActual()) return;
@@ -120,292 +149,269 @@ function cambiarPeriodo(meses) {
 }
 
 function renderizarPeriodo() {
-    $('periodoNombre').textContent = nombrePeriodo(periodo);
-    $('btnPeriodoSiguiente').disabled = periodo >= periodoActual();
+    const nombre = nombrePeriodo(periodo).replace(' de ', ' ');
+    document.querySelectorAll('[data-periodo-nombre]').forEach(el => { el.textContent = nombre; });
+    document.querySelectorAll('[data-periodo="1"]').forEach(btn => { btn.disabled = periodo >= periodoActual(); });
 }
 
-// ===== Skeletons de carga =====
+// ===== Piezas de render =====
 function mostrarSkeletons() {
-    const filas = n => '<li class="skeleton skel-fila"></li>'.repeat(n);
-    ['ultimosMovimientos', 'listaMovimientos'].forEach(id => { $(id).innerHTML = filas(4); });
-    ['resumenCuentas', 'resumenCategorias', 'listaCuentas', 'listaCategorias'].forEach(id => { $(id).innerHTML = filas(3); });
+    const bloques = n => '<div class="skeleton"></div>'.repeat(n);
+    const filas = n => '<li class="skeleton"></li>'.repeat(n);
+    ['ultimosMovimientos', 'listaMovimientos'].forEach(id => { $(id).innerHTML = bloques(4); });
+    ['resumenPresupuestos', 'listaCuentas', 'listaCategorias'].forEach(id => { $(id).innerHTML = filas(3); });
 }
 
-// ===== Estado vacío =====
-function htmlVacio(icono, titulo, sub) {
-    return `<li class="vacio">
+function htmlVacio(icono, titulo, sub, etiqueta = 'div') {
+    return `<${etiqueta} class="vacio">
         <i class="ph ${icono}" aria-hidden="true"></i>
         <strong>${titulo}</strong>
         ${sub ? `<span>${sub}</span>` : ''}
-    </li>`;
+    </${etiqueta}>`;
 }
 
-const formatearPorcentaje = valor => `${valor.toFixed(1)}%`;
+const tile = (icono, color) =>
+    `<span class="icono-tile tono-${color}"><i class="ph ${esc(icono)}" aria-hidden="true"></i></span>`;
 
-function formatearConSigno(monto) {
-    return monto > 0 ? `+ ${formatearMoneda(monto)}` : formatearMoneda(monto);
-}
+const nombreCuenta = id => esc(obtenerCuentaPorId(id)?.nombre ?? 'Cuenta eliminada');
 
-// ===== Dashboard =====
-function renderizarDashboard() {
-    const resumen = calcularResumen(periodo);
-    const cantidadCuentas = obtenerCuentas().length;
-    $('saldoTotal').textContent            = formatearMoneda(calcularSaldoTotal());
-    $('saldoCuentas').textContent          = cantidadCuentas === 1 ? 'En 1 cuenta' : `En ${cantidadCuentas} cuentas`;
-    $('ingresosMes').textContent           = formatearMoneda(resumen.ingresos);
-    $('gastosMes').textContent             = formatearMoneda(resumen.gastos);
-    $('resultadoMes').textContent          = formatearConSigno(resumen.resultado);
-    $('cantidadMovimientos').textContent   = resumen.cantidad;
-    $('porcentajePresupuesto').textContent = formatearPorcentaje(resumen.porcentajePresupuesto);
-    $('promedioDiario').textContent        = formatearMoneda(calcularPromedioDiario(periodo));
-    renderizarResumenCuentas();
-    renderizarUltimosMovimientos();
-    renderizarResumenCategorias();
-}
-
-function renderizarResumenCuentas() {
-    const cuentas = obtenerCuentasConSaldo();
-    $('resumenCuentas').innerHTML = cuentas.length
-        ? cuentas.map(c => `
-            <li class="categoria-mini">
-                <span class="categoria-mini-icono"><i class="ph ${TIPOS_CUENTA[c.tipo].icono}" aria-hidden="true"></i></span>
-                <span class="categoria-mini-nombre">${esc(c.nombre)}</span>
-                <span class="categoria-mini-monto ${c.saldo < 0 ? 'negativo' : ''}">${formatearMoneda(c.saldo)}</span>
-            </li>
-        `).join('')
-        : htmlVacio('ph-wallet', 'No hay cuentas', 'Creá una para empezar a registrar movimientos.');
-}
-
-function renderizarUltimosMovimientos() {
-    const ultimos = obtenerMovimientos(periodo).slice(0, 5);
-    $('ultimosMovimientos').innerHTML = ultimos.length
-        ? ultimos.map((m, i) => crearHTMLMovimiento(m, false, i)).join('')
-        : htmlVacio('ph-tray', 'Sin movimientos este mes', 'Tocá el botón + para registrar uno.');
-}
-
-function renderizarResumenCategorias() {
-    const cats = obtenerCategoriasConMonto('gasto', periodo);
-    $('resumenCategorias').innerHTML = cats.length
-        ? cats.slice(0, 5).map(c => `
-            <li class="categoria-mini">
-                <span class="categoria-mini-icono">${esc(c.icono)}</span>
-                <span class="categoria-mini-nombre">${esc(c.nombre)}</span>
-                <span class="categoria-mini-monto">${formatearMoneda(c.monto)} / ${formatearMoneda(c.presupuesto)}</span>
-            </li>
-        `).join('')
-        : htmlVacio('ph-squares-four', 'No hay categorías de gasto');
-}
-
-// ===== Cuentas =====
-function renderizarCuentas() {
-    const cuentas = obtenerCuentasConSaldo();
-    if (cuentas.length === 0) {
-        $('listaCuentas').innerHTML = htmlVacio('ph-wallet', 'Todavía no hay cuentas', 'Creá la primera con el botón de arriba.');
-        return;
+function filaMovimiento(m) {
+    let icono, color, meta, monto, claseMonto = '';
+    if (m.tipo === 'transferencia') {
+        [icono, color] = ['ph-arrows-left-right', 'gris'];
+        meta = `${nombreCuenta(m.cuentaId)} → ${nombreCuenta(m.cuentaDestinoId)}`;
+        monto = formatearMoneda(m.monto);
+        claseMonto = 'transferencia';
+    } else {
+        const cat = m.categoriaId ? obtenerCategoriaPorId(m.categoriaId) : null;
+        const esIngreso = m.tipo === 'ingreso';
+        [icono, color] = cat ? [cat.icono, cat.color] : (esIngreso ? ['ph-arrow-down-left', 'verde'] : ['ph-receipt', 'gris']);
+        meta = `${cat ? esc(cat.nombre) : 'Sin categoría'} · ${nombreCuenta(m.cuentaId)}`;
+        monto = esIngreso ? formatearConSigno(m.monto) : formatearMoneda(-m.monto);
+        claseMonto = esIngreso ? 'ingreso' : '';
     }
-    $('listaCuentas').innerHTML = cuentas.map((c, i) => {
-        const nombre = esc(c.nombre);
-        const id = esc(c.id);
-        return `
-            <li class="movimiento cuenta" style="--i:${i}">
-                <span class="movimiento-icono"><i class="ph ${TIPOS_CUENTA[c.tipo].icono}" aria-hidden="true"></i></span>
-                <div class="movimiento-info">
-                    <div class="movimiento-descripcion">${nombre}</div>
-                    <div class="movimiento-meta">${TIPOS_CUENTA[c.tipo].nombre}</div>
-                </div>
-                <div class="movimiento-monto ${c.saldo < 0 ? 'negativo' : ''}">${formatearMoneda(c.saldo)}</div>
-                <div class="movimiento-acciones">
-                    <button class="movimiento-accion" type="button" data-editar-cuenta="${id}" aria-label="Editar ${nombre}"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
-                    <button class="movimiento-accion peligro" type="button" data-eliminar-cuenta="${id}" aria-label="Eliminar ${nombre}"><i class="ph ph-trash" aria-hidden="true"></i></button>
-                </div>
-            </li>
-        `;
-    }).join('');
+    return `
+        <button class="fila" type="button" data-editar-movimiento="${esc(m.id)}">
+            ${tile(icono, color)}
+            <span class="fila-texto">
+                <span class="fila-nombre">${esc(m.descripcion)}</span>
+                <span class="fila-meta">${meta}</span>
+            </span>
+            <span class="fila-monto monto ${claseMonto}">${monto}</span>
+        </button>`;
 }
 
-// ===== Categorías =====
-function renderizarCategorias() {
-    const cont = $('listaCategorias');
-    const cats = obtenerCategoriasConMonto(tipoCategoriaActual, periodo);
-    if (cats.length === 0) {
-        cont.innerHTML = htmlVacio('ph-squares-four', 'Todavía no hay categorías', 'Creá la primera con el botón de arriba.');
-        return;
+function htmlGrupos(lista) {
+    return `<div class="grupos">${agruparPorDia(lista).map(g => `
+        <section class="grupo-dia">
+            <h3 class="grupo-dia-titulo">
+                <span>${etiquetaDia(g.fecha)}</span>
+                <span class="monto">${g.soloTransferencias ? 'Entre cuentas' : formatearConSigno(g.neto)}</span>
+            </h3>
+            ${g.movimientos.map(filaMovimiento).join('')}
+        </section>`).join('')}</div>`;
+}
+
+function claseSalud(porcentaje) {
+    if (porcentaje >= 100) return 'excedida';
+    if (porcentaje >= 80) return 'cerca';
+    return '';
+}
+
+function filaPresupuesto(c, conLado = true) {
+    const porcentaje = c.presupuesto > 0 ? (c.monto / c.presupuesto) * 100 : 0;
+    const restante = c.presupuesto - c.monto;
+    let lado = '';
+    if (conLado) {
+        lado = c.presupuesto <= 0
+            ? '<span class="fila-meta">Sin presupuesto</span>'
+            : restante >= 0
+                ? `<span class="fila-meta">Quedan</span><span class="fila-monto monto">${formatearMoneda(restante)}</span>`
+                : `<span class="fila-meta">Excedido</span><span class="fila-monto monto negativo">${formatearMoneda(-restante)}</span>`;
     }
-    const mes = nombrePeriodo(periodo).split(' ')[0];
-    cont.innerHTML = cats.map((c, i) => {
-        const nombre = esc(c.nombre);
-        const id = esc(c.id);
-        const encabezado = `
-            <div class="categoria-encabezado">
-                <span class="categoria-icono">${esc(c.icono)}</span>
-                <span class="categoria-nombre">${nombre}</span>
-                <div class="categoria-acciones">
-                    <button class="movimiento-accion" type="button" data-editar-categoria="${id}" aria-label="Editar ${nombre}"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
-                    <button class="movimiento-accion peligro" type="button" data-eliminar-categoria="${id}" aria-label="Eliminar ${nombre}"><i class="ph ph-trash" aria-hidden="true"></i></button>
-                </div>
-            </div>`;
-        if (c.tipo === 'ingreso') {
-            return `
-                <li class="categoria" style="--i:${i}">
-                    ${encabezado}
-                    <div class="categoria-dato">
-                        <span>Recibido en ${mes}</span>
-                        <strong>${formatearMoneda(c.monto)}</strong>
-                    </div>
-                </li>
-            `;
-        }
-        const disponible = c.presupuesto - c.monto;
-        const porcentaje = c.presupuesto > 0 ? (c.monto / c.presupuesto) * 100 : 0;
-        const salud = porcentaje >= 100 ? 'alerta' : (porcentaje >= 80 ? 'cerca' : '');
-        return `
-            <li class="categoria" style="--i:${i}">
-                ${encabezado}
-                <div class="categoria-datos">
-                    <div class="categoria-dato">
-                        <span>Presupuesto</span>
-                        <strong>${formatearMoneda(c.presupuesto)}</strong>
-                    </div>
-                    <div class="categoria-dato">
-                        <span>Gastado</span>
-                        <strong>${formatearMoneda(c.monto)}</strong>
-                    </div>
-                    <div class="categoria-dato">
-                        <span>Disponible</span>
-                        <strong>${formatearMoneda(disponible)}</strong>
-                    </div>
-                </div>
-                <div class="barra-progreso">
-                    <div class="barra-progreso-relleno ${salud}" data-w="${Math.min(porcentaje, 100)}" style="width:0"></div>
-                </div>
-                <div class="categoria-porcentaje">${formatearPorcentaje(porcentaje)} utilizado</div>
-            </li>
-        `;
-    }).join('');
-    // Animar barras desde 0 hasta su valor real
+    return `
+        <button class="fila fila-presupuesto" type="button" data-editar-categoria="${esc(c.id)}">
+            ${tile(c.icono, c.color)}
+            <span class="fila-texto">
+                <span class="fila-nombre">${esc(c.nombre)}</span>
+                <span class="fila-meta monto">${formatearMoneda(c.monto)} de ${formatearMoneda(c.presupuesto)}</span>
+            </span>
+            ${conLado ? `<span class="fila-lado">${lado}</span>` : `<span class="fila-meta">${formatearPorcentaje(porcentaje)}</span>`}
+            <span class="barra"><span class="barra-relleno ${claseSalud(porcentaje)}" data-ancho="${Math.min(porcentaje, 100)}"></span></span>
+        </button>`;
+}
+
+// Las barras se animan desde 0 hasta su valor real.
+function animarBarras(contenedor) {
     requestAnimationFrame(() => {
-        cont.querySelectorAll('.barra-progreso-relleno').forEach(b => { b.style.width = `${b.dataset.w}%`; });
+        contenedor.querySelectorAll('.barra-relleno[data-ancho]').forEach(b => { b.style.width = `${b.dataset.ancho}%`; });
     });
+}
+
+// ===== Inicio =====
+function renderizarInicio() {
+    const hora = new Date().getHours();
+    $('saludo').textContent = hora >= 5 && hora < 13 ? 'Buen día' : (hora >= 13 && hora < 20 ? 'Buenas tardes' : 'Buenas noches');
+    const hoy = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(',', '');
+    $('fechaHoy').textContent = hoy.charAt(0).toUpperCase() + hoy.slice(1);
+
+    const resumen = calcularResumen(periodo);
+    const cuentas = obtenerCuentasConSaldo();
+    const mes = nombreMes(periodo);
+    $('saldoTotal').textContent = formatearMoneda(calcularSaldoTotal());
+    $('saldoCuentas').textContent = cuentas.length === 1 ? 'En 1 cuenta' : `En ${cuentas.length} cuentas`;
+
+    const pastilla = $('resultadoMes');
+    pastilla.textContent = resumen.cantidad
+        ? `${formatearConSigno(resumen.resultado)} en ${mes}`
+        : `Sin movimientos en ${mes}`;
+    pastilla.classList.toggle('negativa', resumen.resultado < 0);
+
+    $('resumenCuentas').innerHTML = cuentas.map(c => `
+        <li>
+            <button class="cuenta-mini" type="button" data-editar-cuenta="${esc(c.id)}">
+                <i class="ph ${TIPOS_CUENTA[c.tipo].icono}" aria-hidden="true"></i>
+                <span>
+                    <span class="cuenta-mini-nombre">${esc(c.nombre)}</span>
+                    <span class="cuenta-mini-saldo monto ${c.saldo < 0 ? 'negativo' : ''}">${formatearMoneda(c.saldo)}</span>
+                </span>
+            </button>
+        </li>`).join('');
+
+    $('tituloResumenMes').textContent = mes;
+    $('presupuestoUsado').textContent = resumen.presupuesto > 0
+        ? `Presupuesto ${formatearPorcentaje(resumen.porcentajePresupuesto)} usado`
+        : 'Sin presupuestos';
+    const barra = $('barraPresupuesto');
+    barra.className = `barra-relleno ${claseSalud(resumen.porcentajePresupuesto)}`;
+    barra.dataset.ancho = Math.min(resumen.porcentajePresupuesto, 100);
+    animarBarras(barra.parentElement);
+    $('ingresosMes').textContent = formatearConSigno(resumen.ingresos);
+    $('gastosMes').textContent = formatearMoneda(resumen.gastos);
+
+    const ultimos = obtenerMovimientos(periodo).slice(0, 6);
+    $('ultimosMovimientos').innerHTML = ultimos.length
+        ? htmlGrupos(ultimos)
+        : htmlVacio('ph-tray', `Sin movimientos en ${mes}`, 'Tocá + para registrar el primero.');
+
+    const conPresupuesto = obtenerCategoriasConMonto('gasto', periodo)
+        .filter(c => c.presupuesto > 0)
+        .sort((a, b) => b.monto / b.presupuesto - a.monto / a.presupuesto)
+        .slice(0, 4);
+    $('resumenPresupuestos').innerHTML = conPresupuesto.length
+        ? conPresupuesto.map(c => `<li>${filaPresupuesto(c, false)}</li>`).join('')
+        : htmlVacio('ph-target', 'Sin presupuestos', 'Asigná un presupuesto mensual a tus categorías.', 'li');
+    animarBarras($('resumenPresupuestos'));
 }
 
 // ===== Movimientos =====
 function renderizarMovimientos() {
+    const resumen = calcularResumen(periodo);
+    $('movIngresos').textContent = formatearConSigno(resumen.ingresos);
+    $('movGastos').textContent = formatearMoneda(resumen.gastos);
     const lista = buscarYFiltrar(busquedaActual, filtroActual, periodo);
     if (lista.length === 0) {
         $('listaMovimientos').innerHTML = busquedaActual || filtroActual !== 'todos'
             ? htmlVacio('ph-magnifying-glass', 'Sin resultados', 'Probá con otro texto, filtro o mes.')
-            : htmlVacio('ph-tray', 'Sin movimientos este mes', 'Tocá el botón + para registrar uno.');
+            : htmlVacio('ph-tray', `Sin movimientos en ${nombreMes(periodo)}`, 'Tocá + para registrar el primero.');
         return;
     }
-    $('listaMovimientos').innerHTML = lista.map((m, i) => crearHTMLMovimiento(m, true, i)).join('');
-}
-
-const nombreCuenta = id => esc(obtenerCuentaPorId(id)?.nombre ?? 'Cuenta eliminada');
-
-function crearHTMLMovimiento(m, conAcciones, indice = 0) {
-    let icono;
-    let detalle;
-    let monto;
-    if (m.tipo === 'transferencia') {
-        icono = '<i class="ph ph-arrows-left-right" aria-hidden="true"></i>';
-        detalle = `${nombreCuenta(m.cuentaId)} → ${nombreCuenta(m.cuentaDestinoId)}`;
-        monto = formatearMoneda(m.monto);
-    } else {
-        const cat = m.categoriaId ? obtenerCategoriaPorId(m.categoriaId) : null;
-        const iconoDefecto = m.tipo === 'ingreso' ? 'ph-arrow-down-left' : 'ph-receipt';
-        icono = cat ? esc(cat.icono) : `<i class="ph ${iconoDefecto}" aria-hidden="true"></i>`;
-        detalle = `${cat ? esc(cat.nombre) : 'Sin categoría'} · ${nombreCuenta(m.cuentaId)}`;
-        monto = `${m.tipo === 'ingreso' ? '+' : '-'} ${formatearMoneda(m.monto)}`;
-    }
-    const descripcion = esc(m.descripcion);
-    const id = esc(m.id);
-    const acciones = conAcciones ? `
-        <div class="movimiento-acciones">
-            <button class="movimiento-accion" type="button" data-editar-movimiento="${id}" aria-label="Editar ${descripcion}"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
-            <button class="movimiento-accion peligro" type="button" data-eliminar-movimiento="${id}" aria-label="Eliminar ${descripcion}"><i class="ph ph-trash" aria-hidden="true"></i></button>
-        </div>
-    ` : '';
-    return `
-        <li class="movimiento movimiento-${m.tipo}" style="--i:${indice}">
-            <span class="movimiento-icono">${icono}</span>
-            <div class="movimiento-info">
-                <div class="movimiento-descripcion">${descripcion}</div>
-                <div class="movimiento-meta">${detalle} · ${formatearFecha(m.fecha)}</div>
-            </div>
-            <div class="movimiento-monto">${monto}</div>
-            ${acciones}
-        </li>
-    `;
-}
-
-// Un solo listener por lista (delegación), en lugar de re-enlazar en cada render.
-function delegar(idLista, acciones) {
-    $(idLista).addEventListener('click', e => {
-        for (const [atributo, accion] of Object.entries(acciones)) {
-            const btn = e.target.closest(`[data-${atributo}]`);
-            if (btn) return accion(btn.getAttribute(`data-${atributo}`));
-        }
-    });
-}
-
-function configurarListas() {
-    delegar('listaCuentas', {
-        'editar-cuenta': id => abrirModalCuenta(id),
-        'eliminar-cuenta': confirmarEliminarCuenta
-    });
-    delegar('listaCategorias', {
-        'editar-categoria': id => abrirModalCategoria(id),
-        'eliminar-categoria': confirmarEliminarCategoria
-    });
-    delegar('listaMovimientos', {
-        'editar-movimiento': id => abrirModalMovimiento(id),
-        'eliminar-movimiento': confirmarEliminarMovimiento
-    });
-    delegar('selectorEmojis', { emoji: seleccionarEmoji });
-}
-
-// ===== Buscador y filtros =====
-function activarEnGrupo(grupo, activo) {
-    grupo.querySelectorAll('.filtro-btn').forEach(b => {
-        b.classList.toggle('activa', b === activo);
-        b.setAttribute('aria-pressed', String(b === activo));
-    });
+    $('listaMovimientos').innerHTML = htmlGrupos(lista);
 }
 
 function configurarBuscadorYFiltros() {
+    $('btnBuscar').addEventListener('click', () => {
+        const campo = $('campoBuscar');
+        const abrir = campo.hidden;
+        campo.hidden = !abrir;
+        $('btnBuscar').setAttribute('aria-expanded', String(abrir));
+        if (abrir) {
+            $('buscador').focus();
+        } else if (busquedaActual) {
+            $('buscador').value = '';
+            busquedaActual = '';
+            renderizarMovimientos();
+        }
+    });
     $('buscador').addEventListener('input', e => {
         busquedaActual = e.target.value;
         renderizarMovimientos();
     });
-    $('filtrosMovimientos').querySelectorAll('.filtro-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            activarEnGrupo($('filtrosMovimientos'), btn);
-            filtroActual = btn.dataset.filtro;
-            renderizarMovimientos();
-        });
+    configurarChips('filtrosMovimientos', btn => {
+        filtroActual = btn.dataset.filtro;
+        renderizarMovimientos();
     });
-    $('filtrosCategorias').querySelectorAll('.filtro-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            activarEnGrupo($('filtrosCategorias'), btn);
-            tipoCategoriaActual = btn.dataset.tipoCategoria;
-            renderizarCategorias();
-        });
+    configurarChips('filtrosCategorias', btn => {
+        tipoCategoriaActual = btn.dataset.tipoCategoria;
+        renderizarPresupuestos();
     });
 }
 
-// ===== Estadísticas =====
-function renderizarEstadisticas() {
+function configurarChips(idGrupo, alElegir) {
+    const grupo = $(idGrupo);
+    grupo.addEventListener('click', e => {
+        const btn = e.target.closest('.chip');
+        if (!btn) return;
+        grupo.querySelectorAll('.chip').forEach(b => {
+            b.classList.toggle('activa', b === btn);
+            b.setAttribute('aria-pressed', String(b === btn));
+        });
+        alElegir(btn);
+    });
+}
+
+// ===== Cuentas =====
+function renderizarCuentas() {
+    $('totalCuentas').textContent = formatearMoneda(calcularSaldoTotal());
+    const cuentas = obtenerCuentasConSaldo();
+    $('listaCuentas').innerHTML = cuentas.length
+        ? cuentas.map(c => `
+            <li>
+                <button class="fila" type="button" data-editar-cuenta="${esc(c.id)}">
+                    ${tile(TIPOS_CUENTA[c.tipo].icono, 'gris')}
+                    <span class="fila-texto">
+                        <span class="fila-nombre">${esc(c.nombre)}</span>
+                        <span class="fila-meta">${TIPOS_CUENTA[c.tipo].nombre}</span>
+                    </span>
+                    <span class="fila-monto monto ${c.saldo < 0 ? 'negativo' : ''}">${formatearMoneda(c.saldo)}</span>
+                </button>
+            </li>`).join('')
+        : htmlVacio('ph-wallet', 'Todavía no hay cuentas', 'Creá la primera con el botón +.', 'li');
+}
+
+// ===== Presupuestos =====
+function renderizarPresupuestos() {
+    const cats = obtenerCategoriasConMonto(tipoCategoriaActual, periodo);
+    const cont = $('listaCategorias');
+    if (cats.length === 0) {
+        cont.innerHTML = htmlVacio('ph-squares-four', 'Todavía no hay categorías', 'Creá la primera con el botón +.', 'li');
+        return;
+    }
+    const mes = nombreMes(periodo);
+    cont.innerHTML = cats.map(c => `<li>${c.tipo === 'gasto'
+        ? filaPresupuesto(c)
+        : `<button class="fila" type="button" data-editar-categoria="${esc(c.id)}">
+                ${tile(c.icono, c.color)}
+                <span class="fila-texto">
+                    <span class="fila-nombre">${esc(c.nombre)}</span>
+                    <span class="fila-meta">Recibido en ${mes}</span>
+                </span>
+                <span class="fila-monto monto ${c.monto > 0 ? 'ingreso' : ''}">${formatearConSigno(c.monto)}</span>
+            </button>`}</li>`).join('');
+    animarBarras(cont);
+}
+
+// ===== Análisis =====
+function renderizarAnalisis() {
     const resumen = calcularResumen(periodo);
     const top = obtenerCategoriaMasGastada(periodo);
     const variacion = calcularVariacionGastos(periodo);
-    $('statCategoriaTop').textContent          = top ? `${top.icono} ${top.nombre}` : 'Sin datos';
-    $('statTotalGastado').textContent          = formatearMoneda(resumen.gastos);
-    $('statTotalIngresos').textContent         = formatearMoneda(resumen.ingresos);
-    $('statPromedioDiario').textContent        = formatearMoneda(calcularPromedioDiario(periodo));
-    $('statPorcentajePresupuesto').textContent = formatearPorcentaje(resumen.porcentajePresupuesto);
-    $('statVariacion').textContent             = variacion === null
-        ? '—'
-        : `${variacion > 0 ? '+' : ''}${formatearPorcentaje(variacion)}`;
+    $('statIngresos').textContent      = formatearConSigno(resumen.ingresos);
+    $('statGastos').textContent        = formatearMoneda(resumen.gastos);
+    $('statPromedioDiario').textContent = formatearMoneda(calcularPromedioDiario(periodo));
+    $('statPresupuesto').textContent   = resumen.presupuesto > 0 ? formatearPorcentaje(resumen.porcentajePresupuesto) : '—';
+    $('statVariacion').textContent     = variacion === null ? '—' : `${variacion > 0 ? '+' : ''}${formatearPorcentaje(variacion)}`;
+    $('statCategoriaTop').textContent  = top ? top.nombre : '—';
 }
 
 function renderizarGrafico() {
@@ -413,27 +419,20 @@ function renderizarGrafico() {
     if (!ctx || typeof Chart === 'undefined') return;
     const contenedor = ctx.parentElement;
     const datos = obtenerDatosGrafico(periodo);
-    let aviso = contenedor.querySelector('.grafico-vacio');
+    contenedor.querySelector('.vacio')?.remove();
 
     if (datos.length === 0) {
         graficoCategorias?.destroy();
         graficoCategorias = null;
-        ctx.style.display = 'none';
-        if (!aviso) {
-            aviso = document.createElement('div');
-            aviso.className = 'vacio grafico-vacio';
-            aviso.innerHTML = '<i class="ph ph-chart-pie-slice" aria-hidden="true"></i><strong>Sin gastos este mes</strong><span>Registrá un gasto para ver el desglose.</span>';
-            contenedor.appendChild(aviso);
-        }
+        ctx.hidden = true;
+        contenedor.insertAdjacentHTML('beforeend', htmlVacio('ph-chart-pie-slice', `Sin gastos en ${nombreMes(periodo)}`, 'Registrá un gasto para ver el desglose.'));
         return;
     }
-    aviso?.remove();
-    ctx.style.display = '';
+    ctx.hidden = false;
 
     const estilos = getComputedStyle(document.documentElement);
-    const colorTexto = estilos.getPropertyValue('--tinta-suave').trim() || '#888';
-    const colorBorde = estilos.getPropertyValue('--superficie').trim() || '#fff';
-    const colores = datos.map((d, i) => d.sinCategoria ? COLOR_SIN_CATEGORIA : PALETA_GRAFICO[i % PALETA_GRAFICO.length]);
+    const token = nombre => estilos.getPropertyValue(nombre).trim();
+    const reducirMovimiento = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     graficoCategorias?.destroy();
     graficoCategorias = new Chart(ctx, {
@@ -442,90 +441,81 @@ function renderizarGrafico() {
             labels: datos.map(d => d.etiqueta),
             datasets: [{
                 data: datos.map(d => d.valor),
-                backgroundColor: colores,
-                borderColor: colorBorde,
+                backgroundColor: datos.map(d => token(`--${d.color}-fg`)),
+                borderColor: token('--superficie'),
                 borderWidth: 3,
-                hoverOffset: 8
+                hoverOffset: 6
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            cutout: '62%',
-            animation: { duration: prefiereMenosMovimiento() ? 0 : 600, easing: 'easeOutQuart' },
+            cutout: '68%',
+            animation: { duration: reducirMovimiento ? 0 : 600, easing: 'easeOutQuart' },
             plugins: {
                 legend: {
                     position: 'bottom',
                     labels: {
-                        color: colorTexto,
+                        color: token('--tinta-suave'),
                         usePointStyle: true,
                         pointStyle: 'circle',
                         padding: 14,
-                        font: { family: 'Manrope', size: 12, weight: '600' }
+                        font: { family: FUENTE, size: 13, weight: '500' }
                     }
                 },
                 tooltip: {
                     padding: 12,
                     cornerRadius: 10,
-                    titleFont: { family: 'Manrope', weight: '700' },
-                    bodyFont: { family: 'Manrope' },
-                    callbacks: {
-                        label: c => ` ${formatearMoneda(c.parsed)}`
-                    }
+                    titleFont: { family: FUENTE, weight: '600' },
+                    bodyFont: { family: FUENTE },
+                    callbacks: { label: c => ` ${formatearMoneda(c.parsed)}` }
                 }
             }
         }
     });
 }
 
-function prefiereMenosMovimiento() {
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-// ===== Botones globales =====
-function configurarBotones() {
-    $('btnNuevaCuenta').addEventListener('click', () => abrirModalCuenta());
-    $('btnNuevaCategoria').addEventListener('click', () => abrirModalCategoria());
-    $('btnNuevoMovimiento').addEventListener('click', () => abrirModalMovimiento());
-    document.querySelectorAll('[data-nuevo-movimiento]').forEach(btn => {
-        btn.addEventListener('click', () => abrirModalMovimiento(null, btn.dataset.nuevoMovimiento));
-    });
-}
-
-// ===== Modales (apertura/cierre + foco accesible) =====
+// ===== Modales =====
 function configurarModales() {
     document.querySelectorAll('[data-cerrar]').forEach(el => {
         el.addEventListener('click', () => cerrarModal(el.dataset.cerrar));
     });
 }
 
-function abrirModal(id) {
+function abrirModal(id, enfocar) {
     const modal = $(id);
-    focoPrevio = document.activeElement;
+    modalesAbiertos.push({ id, foco: document.activeElement });
     modal.classList.add('activo');
     modal.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
     modal.addEventListener('keydown', manejarTeclasModal);
-    const primerCampo = modal.querySelector('input:not([type=hidden]):not([type=date]), select, textarea, button:not(.modal-cerrar)');
-    if (primerCampo) setTimeout(() => primerCampo.focus({ preventScroll: true }), 60);
+    const destino = enfocar ?? modal.querySelector('input:not([type=hidden]), select, button:not([data-cerrar])');
+    if (destino) setTimeout(() => destino.focus({ preventScroll: true }), 60);
 }
 
 function cerrarModal(id) {
     const modal = $(id);
+    if (!modal.classList.contains('activo')) return;
     modal.classList.remove('activo');
     modal.setAttribute('aria-hidden', 'true');
-    document.body.style.overflow = '';
     modal.removeEventListener('keydown', manejarTeclasModal);
-    focoPrevio?.focus?.({ preventScroll: true });
+    const indice = modalesAbiertos.findIndex(m => m.id === id);
+    const [{ foco } = {}] = indice >= 0 ? modalesAbiertos.splice(indice, 1) : [];
+    if (modalesAbiertos.length === 0) document.body.style.overflow = '';
+    if (foco?.isConnected) foco.focus({ preventScroll: true });
+    if (id === 'modalConfirmar' && resolverConfirmacion) {
+        const resolver = resolverConfirmacion;
+        resolverConfirmacion = null;
+        resolver(false);
+    }
 }
 
 function manejarTeclasModal(e) {
     const modal = e.currentTarget;
-    if (e.key === 'Escape') { cerrarModal(modal.id); return; }
+    if (e.key === 'Escape') { e.stopPropagation(); cerrarModal(modal.id); return; }
     if (e.key !== 'Tab') return;
-    const enfocables = [...modal.querySelectorAll(
-        'a[href], button:not([disabled]), input:not([type=hidden]), select, textarea, [tabindex]:not([tabindex="-1"])'
-    )].filter(el => el.offsetParent !== null);
+    const enfocables = [...modal.querySelectorAll('button:not([disabled]), input:not([type=hidden]), select')]
+        .filter(el => el.offsetParent !== null);
     if (enfocables.length === 0) return;
     const primero = enfocables[0];
     const ultimo = enfocables[enfocables.length - 1];
@@ -533,175 +523,49 @@ function manejarTeclasModal(e) {
     else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primero.focus(); }
 }
 
-// ===== Modal Cuenta =====
-function abrirModalCuenta(id) {
-    $('formCuenta').reset();
-    $('cuentaTipo').innerHTML = Object.entries(TIPOS_CUENTA)
-        .map(([clave, t]) => `<option value="${clave}">${t.nombre}</option>`)
-        .join('');
-    if (id) {
-        const cuenta = obtenerCuentaPorId(id);
-        if (!cuenta) return;
-        $('tituloModalCuenta').textContent = 'Editar cuenta';
-        $('cuentaId').value           = cuenta.id;
-        $('cuentaNombre').value       = cuenta.nombre;
-        $('cuentaTipo').value         = cuenta.tipo;
-        $('cuentaSaldoInicial').value = cuenta.saldoInicial;
-    } else {
-        $('tituloModalCuenta').textContent = 'Nueva cuenta';
-        $('cuentaId').value = '';
-        $('cuentaSaldoInicial').value = 0;
-    }
-    abrirModal('modalCuenta');
-}
-
-function configurarFormularioCuenta() {
-    $('formCuenta').addEventListener('submit', e => {
-        e.preventDefault();
-        const id           = $('cuentaId').value;
-        const nombre       = $('cuentaNombre').value;
-        const tipo         = $('cuentaTipo').value;
-        const saldoInicial = Number($('cuentaSaldoInicial').value);
-        if (!nombre.trim()) {
-            mostrarToast('Escribí un nombre para la cuenta', 'alerta');
-            return;
-        }
-        if (!Number.isFinite(saldoInicial)) {
-            mostrarToast('Ingresá un saldo inicial válido', 'alerta');
-            return;
-        }
-        if (id) {
-            editarCuenta(id, { nombre, tipo, saldoInicial });
-            mostrarToast('Cuenta actualizada');
-        } else {
-            crearCuenta({ nombre, tipo, saldoInicial });
-            mostrarToast('Cuenta creada');
-        }
-        cerrarModal('modalCuenta');
-        renderizarTodo();
+// ===== Diálogo de confirmación =====
+function configurarConfirmacion() {
+    $('confirmarCancelar').addEventListener('click', () => cerrarModal('modalConfirmar'));
+    $('confirmarAceptar').addEventListener('click', () => {
+        const resolver = resolverConfirmacion;
+        resolverConfirmacion = null;
+        cerrarModal('modalConfirmar');
+        resolver?.(true);
     });
 }
 
-function confirmarEliminarCuenta(id) {
-    const usos = contarMovimientosDeCuenta(id);
-    if (usos > 0) {
-        Swal.fire(opcionesSwal({
-            title: 'No se puede eliminar',
-            text: `La cuenta tiene ${usos} ${usos === 1 ? 'movimiento' : 'movimientos'}. Eliminalos o pasalos a otra cuenta primero.`,
-            icon: 'info',
-            confirmButtonColor: '#6C5CE7'
-        }));
-        return;
-    }
-    Swal.fire(opcionesSwal({
-        title: '¿Eliminar cuenta?',
-        text: 'Esta acción no se puede deshacer.',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Sí, eliminar',
-        cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#FF5C5C',
-        cancelButtonColor: '#6B7280'
-    })).then(resultado => {
-        if (resultado.isConfirmed && eliminarCuenta(id)) {
-            mostrarToast('Cuenta eliminada');
-            renderizarTodo();
-        }
+// Devuelve una promesa que resuelve true si el usuario acepta.
+function confirmar({ titulo, texto, aceptar = 'Aceptar', peligro = false, soloAceptar = false }) {
+    $('confirmarTitulo').textContent = titulo;
+    $('confirmarTexto').textContent = texto;
+    $('confirmarAceptar').textContent = aceptar;
+    $('confirmarAceptar').className = `btn ${peligro ? 'btn-peligro' : 'btn-primario'}`;
+    $('confirmarCancelar').hidden = soloAceptar;
+    return new Promise(resolver => {
+        resolverConfirmacion = resolver;
+        abrirModal('modalConfirmar', $(soloAceptar || !peligro ? 'confirmarAceptar' : 'confirmarCancelar'));
     });
 }
 
-// ===== Modal Categoría =====
-function abrirModalCategoria(id) {
-    $('formCategoria').reset();
-    renderizarSelectorEmojis();
-    const cat = id ? obtenerCategoriaPorId(id) : null;
-    if (id && !cat) return;
-    const tipo = cat ? cat.tipo : tipoCategoriaActual;
-    const deTipo = tipo === 'ingreso' ? 'de ingreso' : 'de gasto';
-    $('categoriaTipo').value = tipo;
-    $('campoPresupuesto').hidden = tipo === 'ingreso';
-    $('categoriaPresupuesto').required = tipo === 'gasto';
-    if (cat) {
-        $('tituloModalCategoria').textContent = `Editar categoría ${deTipo}`;
-        $('categoriaId').value          = cat.id;
-        $('categoriaNombre').value      = cat.nombre;
-        $('categoriaPresupuesto').value = cat.presupuesto;
-        seleccionarEmoji(cat.icono);
-    } else {
-        $('tituloModalCategoria').textContent = `Nueva categoría ${deTipo}`;
-        $('categoriaId').value = '';
-        seleccionarEmoji(primerIcono());
-    }
-    abrirModal('modalCategoria');
+// ===== Avisos (toasts) =====
+function mostrarToast(mensaje, tipo = 'ok') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${tipo}`;
+    toast.innerHTML = `<i class="ph ${tipo === 'alerta' ? 'ph-warning-circle' : 'ph-check-circle'}" aria-hidden="true"></i><span></span>`;
+    toast.querySelector('span').textContent = mensaje;
+    $('toasts').appendChild(toast);
+    setTimeout(() => {
+        toast.classList.add('saliendo');
+        setTimeout(() => toast.remove(), 220);
+    }, 2400);
 }
 
-function renderizarSelectorEmojis() {
-    $('selectorEmojis').innerHTML = obtenerGruposIconos().map(g => `
-        <div class="emoji-grupo">
-            <p class="emoji-grupo-titulo">${esc(g.grupo)}</p>
-            <div class="emoji-grupo-grid">
-                ${g.iconos.map(e => `
-                    <button type="button" class="emoji-btn" data-emoji="${esc(e)}" role="radio" aria-checked="false" aria-label="Ícono ${esc(e)}">${esc(e)}</button>
-                `).join('')}
-            </div>
-        </div>
-    `).join('');
-}
-
-function seleccionarEmoji(emoji) {
-    $('categoriaIcono').value = emoji;
-    document.querySelectorAll('#selectorEmojis .emoji-btn').forEach(btn => {
-        const activa = btn.dataset.emoji === emoji;
-        btn.classList.toggle('activa', activa);
-        btn.setAttribute('aria-checked', activa ? 'true' : 'false');
-    });
-}
-
-function configurarFormularioCategoria() {
-    $('formCategoria').addEventListener('submit', e => {
-        e.preventDefault();
-        const id          = $('categoriaId').value;
-        const tipo        = $('categoriaTipo').value;
-        const nombre      = $('categoriaNombre').value;
-        const icono       = $('categoriaIcono').value;
-        const presupuesto = tipo === 'gasto' ? $('categoriaPresupuesto').value : 0;
-        if (!nombre.trim()) {
-            mostrarToast('Escribí un nombre para la categoría', 'alerta');
-            return;
-        }
-        if (!icono) {
-            mostrarToast('Elegí un ícono para la categoría', 'alerta');
-            return;
-        }
-        if (id) {
-            editarCategoria(id, { nombre, icono, presupuesto });
-            mostrarToast('Categoría actualizada');
-        } else {
-            crearCategoria({ nombre, icono, presupuesto, tipo });
-            mostrarToast('Categoría creada');
-        }
-        cerrarModal('modalCategoria');
-        renderizarTodo();
-    });
-}
-
-function confirmarEliminarCategoria(id) {
-    Swal.fire(opcionesSwal({
-        title: '¿Eliminar categoría?',
-        text: 'Sus movimientos se conservan y quedan como "Sin categoría".',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Sí, eliminar',
-        cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#FF5C5C',
-        cancelButtonColor: '#6B7280'
-    })).then(resultado => {
-        if (resultado.isConfirmed) {
-            eliminarCategoria(id);
-            mostrarToast('Categoría eliminada');
-            renderizarTodo();
-        }
-    });
+// Marca el campo inválido, lo enfoca y avisa.
+function errorEnCampo(campo, mensaje) {
+    campo.setAttribute('aria-invalid', 'true');
+    campo.focus();
+    campo.addEventListener('input', () => campo.removeAttribute('aria-invalid'), { once: true });
+    mostrarToast(mensaje, 'alerta');
 }
 
 // ===== Modal Movimiento =====
@@ -709,22 +573,24 @@ const opcionesCuentas = () => obtenerCuentas()
     .map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`)
     .join('');
 
-function abrirModalMovimiento(id, tipoInicial = 'gasto') {
+async function abrirModalMovimiento(id, tipoInicial = 'gasto') {
     if (obtenerCuentas().length === 0) {
-        Swal.fire(opcionesSwal({
-            title: 'Primero creá una cuenta',
-            text: 'Cada movimiento sale de una cuenta o entra en una: efectivo, banco, billetera virtual o tarjeta.',
-            icon: 'info',
-            confirmButtonColor: '#6C5CE7'
-        }));
+        const crear = await confirmar({
+            titulo: 'Primero creá una cuenta',
+            texto: 'Cada movimiento sale de una cuenta o entra en una: efectivo, banco, billetera virtual o tarjeta.',
+            aceptar: 'Crear cuenta'
+        });
+        if (crear) abrirModalCuenta();
         return;
     }
     const m = id ? obtenerMovimientoPorId(id) : null;
     if (id && !m) return;
     $('formMovimiento').reset();
+    $('formMovimiento').querySelectorAll('[aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
     $('movimientoCuenta').innerHTML = opcionesCuentas();
     $('movimientoCuentaDestino').innerHTML = opcionesCuentas();
     seleccionarTipo(m ? m.tipo : tipoInicial);
+    $('btnEliminarMovimiento').hidden = !m;
     if (m) {
         $('tituloModalMovimiento').textContent = 'Editar movimiento';
         $('movimientoId').value          = m.id;
@@ -741,14 +607,15 @@ function abrirModalMovimiento(id, tipoInicial = 'gasto') {
         const cuentas = obtenerCuentas();
         if (cuentas[1]) $('movimientoCuentaDestino').value = cuentas[1].id;
     }
-    abrirModal('modalMovimiento');
+    ajustarAnchoMonto();
+    abrirModal('modalMovimiento', $('movimientoMonto'));
 }
 
 function cargarSelectCategorias(tipo) {
     const select = $('movimientoCategoria');
     const previa = select.value;
     const opciones = obtenerCategorias(tipo)
-        .map(c => `<option value="${esc(c.id)}">${esc(c.icono)} ${esc(c.nombre)}</option>`)
+        .map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`)
         .join('');
     select.innerHTML = '<option value="">Sin categoría</option>' + opciones;
     if (obtenerCategoriaPorId(previa)?.tipo === tipo) select.value = previa;
@@ -757,7 +624,7 @@ function cargarSelectCategorias(tipo) {
 function seleccionarTipo(tipo) {
     const esTransferencia = tipo === 'transferencia';
     $('movimientoTipo').value = tipo;
-    document.querySelectorAll('.toggle-btn').forEach(btn => {
+    document.querySelectorAll('.segmento').forEach(btn => {
         const activa = btn.dataset.tipo === tipo;
         btn.classList.toggle('activa', activa);
         btn.setAttribute('aria-pressed', String(activa));
@@ -765,13 +632,20 @@ function seleccionarTipo(tipo) {
     $('etiquetaCuenta').textContent = esTransferencia ? 'Desde' : 'Cuenta';
     $('campoCuentaDestino').hidden = !esTransferencia;
     $('campoCategoria').hidden = esTransferencia;
-    $('movimientoDescripcion').required = !esTransferencia;
-    $('movimientoDescripcion').placeholder = esTransferencia ? 'Transferencia (opcional)' : 'Ej: Compra supermercado';
+    $('movimientoDescripcion').placeholder = esTransferencia ? 'Transferencia (opcional)' : 'Ej: Supermercado';
     if (!esTransferencia) cargarSelectCategorias(tipo);
 }
 
+// El campo de monto crece con lo que se escribe, así el "$" queda pegado a la cifra.
+function ajustarAnchoMonto() {
+    const input = $('movimientoMonto');
+    const largo = (input.value || input.placeholder).length;
+    input.style.width = `${largo + 0.6}ch`;
+}
+
 function configurarFormularioMovimiento() {
-    document.querySelectorAll('.toggle-btn').forEach(btn => {
+    $('movimientoMonto').addEventListener('input', ajustarAnchoMonto);
+    document.querySelectorAll('.segmento').forEach(btn => {
         btn.addEventListener('click', () => seleccionarTipo(btn.dataset.tipo));
     });
     $('formMovimiento').addEventListener('submit', e => {
@@ -785,93 +659,197 @@ function configurarFormularioMovimiento() {
         const categoriaId     = $('movimientoCategoria').value;
         const fecha           = $('movimientoFecha').value;
         const esTransferencia = tipo === 'transferencia';
-        if (!esTransferencia && !descripcion.trim()) {
-            mostrarToast('Escribí una descripción', 'alerta');
-            return;
-        }
-        if (!(monto > 0)) {
-            mostrarToast('El monto tiene que ser mayor a cero', 'alerta');
-            return;
-        }
-        if (!obtenerCuentaPorId(cuentaId)) {
-            mostrarToast('Elegí una cuenta', 'alerta');
-            return;
-        }
+        if (!(monto > 0)) return errorEnCampo($('movimientoMonto'), 'Ingresá un monto mayor a cero');
+        if (!esTransferencia && !descripcion.trim()) return errorEnCampo($('movimientoDescripcion'), 'Escribí una descripción');
+        if (!obtenerCuentaPorId(cuentaId)) return errorEnCampo($('movimientoCuenta'), 'Elegí una cuenta');
         if (esTransferencia && (!obtenerCuentaPorId(cuentaDestinoId) || cuentaDestinoId === cuentaId)) {
-            mostrarToast(obtenerCuentas().length < 2
+            return errorEnCampo($('movimientoCuentaDestino'), obtenerCuentas().length < 2
                 ? 'Necesitás al menos dos cuentas para transferir'
-                : 'Elegí una cuenta de destino distinta a la de origen', 'alerta');
-            return;
+                : 'Elegí una cuenta de destino distinta a la de origen');
         }
-        if (!esFechaISO(fecha)) {
-            mostrarToast('Elegí una fecha válida', 'alerta');
-            return;
-        }
+        if (!esFechaISO(fecha)) return errorEnCampo($('movimientoFecha'), 'Elegí una fecha válida');
+
         const datos = { descripcion, monto, tipo, fecha, cuentaId, cuentaDestinoId, categoriaId };
         if (id) {
             editarMovimiento(id, datos);
             mostrarToast('Movimiento actualizado');
         } else {
             crearMovimiento(datos);
-            mostrarToast(esTransferencia ? 'Transferencia registrada' : 'Movimiento creado');
+            mostrarToast(esTransferencia ? 'Transferencia registrada' : 'Movimiento registrado');
         }
         cerrarModal('modalMovimiento');
         renderizarTodo();
     });
-}
-
-function confirmarEliminarMovimiento(id) {
-    Swal.fire(opcionesSwal({
-        title: '¿Eliminar movimiento?',
-        text: 'Esta acción no se puede deshacer.',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Sí, eliminar',
-        cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#FF5C5C',
-        cancelButtonColor: '#6B7280'
-    })).then(resultado => {
-        if (resultado.isConfirmed) {
-            eliminarMovimiento(id);
-            mostrarToast('Movimiento eliminado');
-            renderizarTodo();
-        }
+    $('btnEliminarMovimiento').addEventListener('click', async () => {
+        const id = $('movimientoId').value;
+        const ok = await confirmar({
+            titulo: '¿Eliminar movimiento?',
+            texto: 'Esta acción no se puede deshacer.',
+            aceptar: 'Eliminar',
+            peligro: true
+        });
+        if (!ok) return;
+        eliminarMovimiento(id);
+        cerrarModal('modalMovimiento');
+        mostrarToast('Movimiento eliminado');
+        renderizarTodo();
     });
 }
 
-// ===== SweetAlert2 con tema Walletera =====
-function opcionesSwal(opciones) {
-    return {
-        ...opciones,
-        customClass: {
-            popup: 'swal-walletera',
-            confirmButton: 'swal-btn-confirmar',
-            cancelButton: 'swal-btn-cancelar'
-        }
-    };
+// ===== Modal Cuenta =====
+function abrirModalCuenta(id) {
+    const cuenta = id ? obtenerCuentaPorId(id) : null;
+    if (id && !cuenta) return;
+    $('formCuenta').reset();
+    $('cuentaTipo').innerHTML = Object.entries(TIPOS_CUENTA)
+        .map(([clave, t]) => `<option value="${clave}">${t.nombre}</option>`)
+        .join('');
+    $('btnEliminarCuenta').hidden = !cuenta;
+    $('tituloModalCuenta').textContent = cuenta ? 'Editar cuenta' : 'Nueva cuenta';
+    $('cuentaId').value           = cuenta?.id ?? '';
+    $('cuentaNombre').value       = cuenta?.nombre ?? '';
+    $('cuentaTipo').value         = cuenta?.tipo ?? 'banco';
+    $('cuentaSaldoInicial').value = cuenta?.saldoInicial ?? 0;
+    abrirModal('modalCuenta');
 }
 
-// ===== Toast (Toastify) =====
-function mostrarToast(mensaje, tipo) {
-    const estilos = getComputedStyle(document.documentElement);
-    const colores = {
-        ok: estilos.getPropertyValue('--marca').trim(),
-        alerta: estilos.getPropertyValue('--alerta').trim(),
-        peligro: estilos.getPropertyValue('--peligro').trim()
-    };
-    Toastify({
-        text: mensaje,
-        duration: 2400,
-        gravity: 'top',
-        position: 'right',
-        stopOnFocus: true,
-        style: {
-            background: colores[tipo] || colores.ok,
-            color: '#fff',
-            borderRadius: '12px',
-            fontFamily: 'Manrope, sans-serif',
-            fontWeight: '700',
-            boxShadow: 'none'
+function configurarFormularioCuenta() {
+    $('btnNuevaCuenta').addEventListener('click', () => abrirModalCuenta());
+    $('formCuenta').addEventListener('submit', e => {
+        e.preventDefault();
+        const id           = $('cuentaId').value;
+        const nombre       = $('cuentaNombre').value;
+        const tipo         = $('cuentaTipo').value;
+        const saldoInicial = Number($('cuentaSaldoInicial').value);
+        if (!nombre.trim()) return errorEnCampo($('cuentaNombre'), 'Escribí un nombre para la cuenta');
+        if (!Number.isFinite(saldoInicial)) return errorEnCampo($('cuentaSaldoInicial'), 'Ingresá un saldo inicial válido');
+        if (id) {
+            editarCuenta(id, { nombre, tipo, saldoInicial });
+            mostrarToast('Cuenta actualizada');
+        } else {
+            crearCuenta({ nombre, tipo, saldoInicial });
+            mostrarToast('Cuenta creada');
         }
-    }).showToast();
+        cerrarModal('modalCuenta');
+        renderizarTodo();
+    });
+    $('btnEliminarCuenta').addEventListener('click', async () => {
+        const id = $('cuentaId').value;
+        const usos = contarMovimientosDeCuenta(id);
+        if (usos > 0) {
+            await confirmar({
+                titulo: 'No se puede eliminar',
+                texto: `La cuenta tiene ${usos} ${usos === 1 ? 'movimiento' : 'movimientos'}. Eliminalos o pasalos a otra cuenta primero.`,
+                aceptar: 'Entendido',
+                soloAceptar: true
+            });
+            return;
+        }
+        const ok = await confirmar({
+            titulo: '¿Eliminar cuenta?',
+            texto: 'Esta acción no se puede deshacer.',
+            aceptar: 'Eliminar',
+            peligro: true
+        });
+        if (!ok || !eliminarCuenta(id)) return;
+        cerrarModal('modalCuenta');
+        mostrarToast('Cuenta eliminada');
+        renderizarTodo();
+    });
+}
+
+// ===== Modal Categoría =====
+const nombreIcono = icono => icono.replace(/^ph-/, '').replaceAll('-', ' ');
+
+function abrirModalCategoria(id) {
+    const cat = id ? obtenerCategoriaPorId(id) : null;
+    if (id && !cat) return;
+    const tipo = cat ? cat.tipo : tipoCategoriaActual;
+    const deTipo = tipo === 'ingreso' ? 'de ingreso' : 'de gasto';
+    $('formCategoria').reset();
+    $('btnEliminarCategoria').hidden = !cat;
+    $('tituloModalCategoria').textContent = `${cat ? 'Editar' : 'Nueva'} categoría ${deTipo}`;
+    $('categoriaTipo').value = tipo;
+    $('categoriaId').value = cat?.id ?? '';
+    $('categoriaNombre').value = cat?.nombre ?? '';
+    $('categoriaPresupuesto').value = cat?.presupuesto ?? '';
+    $('campoPresupuesto').hidden = tipo === 'ingreso';
+
+    $('selectorColores').innerHTML = COLORES_CATEGORIA.map(color => `
+        <button class="color-btn tono-${color}" type="button" data-color="${color}" aria-pressed="false" aria-label="${NOMBRES_COLOR[color]}"></button>
+    `).join('');
+    $('selectorIconos').innerHTML = obtenerGruposIconos().flatMap(g => g.iconos).map(icono => `
+        <button class="icono-btn" type="button" data-icono="${esc(icono)}" aria-pressed="false" aria-label="${esc(nombreIcono(icono))}"><i class="ph ${esc(icono)}" aria-hidden="true"></i></button>
+    `).join('');
+
+    const colorPorDefecto = COLORES_CATEGORIA[obtenerCategorias().length % COLORES_CATEGORIA.length];
+    seleccionarColor(cat?.color ?? colorPorDefecto);
+    seleccionarIcono(cat?.icono ?? primerIcono());
+    abrirModal('modalCategoria', $('categoriaNombre'));
+}
+
+function marcarEnGrupo(contenedor, atributo, valor) {
+    contenedor.querySelectorAll(`[data-${atributo}]`).forEach(btn => {
+        const activa = btn.getAttribute(`data-${atributo}`) === valor;
+        btn.classList.toggle('activa', activa);
+        btn.setAttribute('aria-pressed', String(activa));
+    });
+}
+
+function seleccionarColor(color) {
+    $('categoriaColor').value = color;
+    $('vistaCategoria').className = `icono-tile grande tono-${color}`;
+    marcarEnGrupo($('selectorColores'), 'color', color);
+}
+
+function seleccionarIcono(icono) {
+    $('categoriaIcono').value = icono;
+    $('vistaCategoria').innerHTML = `<i class="ph ${esc(icono)}" aria-hidden="true"></i>`;
+    marcarEnGrupo($('selectorIconos'), 'icono', icono);
+}
+
+function configurarFormularioCategoria() {
+    $('btnNuevaCategoria').addEventListener('click', () => abrirModalCategoria());
+    $('selectorColores').addEventListener('click', e => {
+        const btn = e.target.closest('[data-color]');
+        if (btn) seleccionarColor(btn.dataset.color);
+    });
+    $('selectorIconos').addEventListener('click', e => {
+        const btn = e.target.closest('[data-icono]');
+        if (btn) seleccionarIcono(btn.dataset.icono);
+    });
+    $('formCategoria').addEventListener('submit', e => {
+        e.preventDefault();
+        const id          = $('categoriaId').value;
+        const tipo        = $('categoriaTipo').value;
+        const nombre      = $('categoriaNombre').value;
+        const icono       = $('categoriaIcono').value;
+        const color       = $('categoriaColor').value;
+        const presupuesto = tipo === 'gasto' ? Number($('categoriaPresupuesto').value || 0) : 0;
+        if (!nombre.trim()) return errorEnCampo($('categoriaNombre'), 'Escribí un nombre para la categoría');
+        if (!Number.isFinite(presupuesto) || presupuesto < 0) return errorEnCampo($('categoriaPresupuesto'), 'Ingresá un presupuesto válido');
+        if (id) {
+            editarCategoria(id, { nombre, icono, color, presupuesto });
+            mostrarToast('Categoría actualizada');
+        } else {
+            crearCategoria({ nombre, icono, color, presupuesto, tipo });
+            mostrarToast('Categoría creada');
+        }
+        cerrarModal('modalCategoria');
+        renderizarTodo();
+    });
+    $('btnEliminarCategoria').addEventListener('click', async () => {
+        const id = $('categoriaId').value;
+        const ok = await confirmar({
+            titulo: '¿Eliminar categoría?',
+            texto: 'Sus movimientos se conservan y quedan como "Sin categoría".',
+            aceptar: 'Eliminar',
+            peligro: true
+        });
+        if (!ok) return;
+        eliminarCategoria(id);
+        cerrarModal('modalCategoria');
+        mostrarToast('Categoría eliminada');
+        renderizarTodo();
+    });
 }

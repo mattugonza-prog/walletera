@@ -10,7 +10,7 @@ const CLAVES = {
 };
 
 // Versión del esquema guardado. Cada salto tiene su paso en migrarDatos().
-const VERSION_DATOS = 4;
+const VERSION_DATOS = 5;
 
 const TIPOS_CUENTA = {
     efectivo:  { nombre: 'Efectivo',           icono: 'ph-money' },
@@ -19,16 +19,39 @@ const TIPOS_CUENTA = {
     credito:   { nombre: 'Tarjeta de crédito', icono: 'ph-credit-card' }
 };
 
+const COLORES_CATEGORIA = ['naranja', 'azul', 'rosa', 'verde', 'violeta', 'amarillo', 'turquesa', 'gris'];
+
 // Catálogo mínimo por si iconos.json no se puede cargar.
 const GRUPOS_ICONOS_FALLBACK = [
-    { grupo: 'Comida y bebida', iconos: ['🍔','🛒','☕','🍎','🥗'] },
-    { grupo: 'Hogar',           iconos: ['🏠','💡','🔥','💧'] },
-    { grupo: 'Transporte',      iconos: ['🚗','⛽','🚌','✈️'] },
-    { grupo: 'Salud',           iconos: ['💊','🏥','💪'] },
-    { grupo: 'Educación',       iconos: ['📚','🎓','💻'] },
-    { grupo: 'Ocio',            iconos: ['🎬','🎮','🎵'] },
-    { grupo: 'Otros',           iconos: ['👕','🐶','💰','🎁'] }
+    { grupo: 'Comida',     iconos: ['ph-fork-knife', 'ph-shopping-cart', 'ph-coffee'] },
+    { grupo: 'Hogar',      iconos: ['ph-house', 'ph-lightning', 'ph-drop'] },
+    { grupo: 'Transporte', iconos: ['ph-car', 'ph-bus', 'ph-gas-pump'] },
+    { grupo: 'Otros',      iconos: ['ph-heartbeat', 'ph-film-slate', 'ph-piggy-bank', 'ph-tag'] }
 ];
+
+// Hasta v4 las categorías usaban emojis; v5 los reemplaza por un ícono y un color.
+const EMOJI_A_ICONO = {
+    '🍔': ['ph-fork-knife', 'naranja'], '🍕': ['ph-fork-knife', 'naranja'], '🥗': ['ph-fork-knife', 'naranja'],
+    '🛒': ['ph-shopping-cart', 'naranja'], '🍎': ['ph-shopping-cart', 'naranja'], '🍞': ['ph-bread', 'naranja'],
+    '☕': ['ph-coffee', 'naranja'], '🍷': ['ph-wine', 'rosa'], '🍺': ['ph-wine', 'amarillo'],
+    '🏠': ['ph-house', 'violeta'], '🏡': ['ph-house', 'violeta'], '💡': ['ph-lightning', 'amarillo'],
+    '🔥': ['ph-flame', 'naranja'], '💧': ['ph-drop', 'azul'], '🛠️': ['ph-wrench', 'gris'], '📺': ['ph-film-slate', 'rosa'],
+    '🚗': ['ph-car', 'azul'], '🚙': ['ph-car', 'azul'], '⛽': ['ph-gas-pump', 'azul'], '🚌': ['ph-bus', 'azul'],
+    '🚕': ['ph-taxi', 'amarillo'], '🚆': ['ph-train', 'azul'], '🚇': ['ph-train', 'azul'], '✈️': ['ph-airplane', 'azul'],
+    '🚲': ['ph-bicycle', 'verde'],
+    '💊': ['ph-pill', 'turquesa'], '🏥': ['ph-first-aid', 'turquesa'], '🦷': ['ph-tooth', 'turquesa'],
+    '💪': ['ph-barbell', 'turquesa'], '🩺': ['ph-heartbeat', 'turquesa'],
+    '📚': ['ph-graduation-cap', 'amarillo'], '🎓': ['ph-graduation-cap', 'amarillo'], '📖': ['ph-book-open', 'amarillo'],
+    '💻': ['ph-laptop', 'azul'], '💼': ['ph-briefcase', 'verde'],
+    '🎬': ['ph-film-slate', 'rosa'], '🎮': ['ph-game-controller', 'rosa'], '🎵': ['ph-music-notes', 'rosa'],
+    '🎟️': ['ph-ticket', 'rosa'], '🏖️': ['ph-umbrella', 'turquesa'],
+    '👕': ['ph-t-shirt', 'violeta'], '👗': ['ph-t-shirt', 'violeta'], '👟': ['ph-shopping-bag', 'violeta'],
+    '👜': ['ph-shopping-bag', 'violeta'], '💇': ['ph-scissors', 'violeta'], '🛍️': ['ph-storefront', 'naranja'],
+    '🐶': ['ph-paw-print', 'naranja'], '🐱': ['ph-paw-print', 'naranja'], '🐾': ['ph-paw-print', 'naranja'],
+    '💰': ['ph-piggy-bank', 'verde'], '💵': ['ph-money', 'verde'], '💳': ['ph-credit-card', 'gris'],
+    '🏦': ['ph-bank', 'gris'], '📈': ['ph-chart-line-up', 'turquesa'], '🪙': ['ph-coins', 'amarillo'],
+    '🧾': ['ph-receipt', 'gris'], '🎁': ['ph-gift', 'rosa'], '❤️': ['ph-heart', 'rosa'], '⭐': ['ph-star', 'amarillo']
+};
 
 // ===== Estado en memoria =====
 let configuracion = {};
@@ -109,6 +132,7 @@ function nombrePeriodo(periodo) {
 // v3: ids string, fecha 'AAAA-MM-DD', ingresos sin categoría, solo datos de origen.
 // v4: cuentas con saldo inicial (reemplazan al "fondo mensual"), transferencias
 //     y categorías con tipo (gasto / ingreso).
+// v5: categorías con ícono de Phosphor y color en lugar de emoji.
 function timestampAFechaISO(ts) {
     const d = new Date(ts);
     // Los timestamps exactos a medianoche UTC vienen de new Date('AAAA-MM-DD'):
@@ -124,10 +148,13 @@ function normalizarCategoria(c) {
     const presupuesto = Number(c.presupuesto ?? 0);
     if (!Number.isFinite(presupuesto) || presupuesto < 0) return null;
     const tipo = c.tipo === 'ingreso' ? 'ingreso' : 'gasto';
+    const esIcono = typeof c.icono === 'string' && /^ph-[a-z0-9-]+$/.test(c.icono);
+    const [iconoMigrado, colorMigrado] = esIcono ? [c.icono] : (EMOJI_A_ICONO[c.icono] ?? ['ph-tag', 'gris']);
     return {
         id: String(c.id ?? generarId()),
         nombre: c.nombre.trim(),
-        icono: typeof c.icono === 'string' && c.icono ? c.icono : '💰',
+        icono: iconoMigrado,
+        color: COLORES_CATEGORIA.includes(c.color) ? c.color : (colorMigrado ?? 'gris'),
         tipo,
         presupuesto: tipo === 'gasto' ? presupuesto : 0
     };
@@ -189,21 +216,25 @@ function migrarDatos() {
     const crudo = {
         configuracion: localStorage.getItem(CLAVES.configuracion),
         categorias: localStorage.getItem(CLAVES.categorias),
+        cuentas: localStorage.getItem(CLAVES.cuentas),
         movimientos: localStorage.getItem(CLAVES.movimientos)
     };
-    if (crudo.categorias || crudo.movimientos || crudo.configuracion) {
+    if (Object.values(crudo).some(Boolean)) {
         // Copia intacta de lo que había antes de migrar, por si algo sale mal.
         localStorage.setItem(`walletera_respaldo_v${version}`, JSON.stringify(crudo));
     }
 
-    const config = leer(CLAVES.configuracion, {});
-    const v3 = migrarAV3({ categorias: leer(CLAVES.categorias, []), movimientos: leer(CLAVES.movimientos, []) });
-    const v4 = migrarAV4(v3, config && typeof config === 'object' ? config : {});
-
-    escribir(CLAVES.configuracion, v4.configuracion);
-    escribir(CLAVES.cuentas, v4.cuentas);
-    escribir(CLAVES.categorias, v4.categorias);
-    escribir(CLAVES.movimientos, v4.movimientos);
+    if (version < 4) {
+        const config = leer(CLAVES.configuracion, {});
+        const v3 = migrarAV3({ categorias: leer(CLAVES.categorias, []), movimientos: leer(CLAVES.movimientos, []) });
+        const v4 = migrarAV4(v3, config && typeof config === 'object' ? config : {});
+        escribir(CLAVES.configuracion, v4.configuracion);
+        escribir(CLAVES.cuentas, v4.cuentas);
+        escribir(CLAVES.categorias, v4.categorias);
+        escribir(CLAVES.movimientos, v4.movimientos);
+    }
+    // v4 → v5: emoji → ícono + color (normalizarCategoria hace la conversión).
+    escribir(CLAVES.categorias, leer(CLAVES.categorias, []).map(normalizarCategoria).filter(Boolean));
     localStorage.setItem(CLAVES.version, String(VERSION_DATOS));
     return { desde: version };
 }
@@ -258,7 +289,7 @@ function obtenerGruposIconos() {
 }
 
 function primerIcono() {
-    return obtenerGruposIconos()[0]?.iconos[0] ?? '💰';
+    return obtenerGruposIconos()[0]?.iconos[0] ?? 'ph-tag';
 }
 
 // ===== Cuentas =====
@@ -332,18 +363,18 @@ function obtenerCategoriaPorId(id) {
     return categorias.find(c => c.id === String(id));
 }
 
-function crearCategoria({ nombre, icono, presupuesto, tipo }) {
-    const nueva = normalizarCategoria({ id: generarId(), nombre, icono, presupuesto, tipo });
+function crearCategoria({ nombre, icono, color, presupuesto, tipo }) {
+    const nueva = normalizarCategoria({ id: generarId(), nombre, icono, color, presupuesto, tipo });
     categorias.push(nueva);
     guardarCategorias();
     return nueva;
 }
 
 // El tipo de una categoría no cambia al editarla: sus movimientos ya son de ese tipo.
-function editarCategoria(id, { nombre, icono, presupuesto }) {
+function editarCategoria(id, { nombre, icono, color, presupuesto }) {
     const cat = obtenerCategoriaPorId(id);
     if (!cat) return null;
-    Object.assign(cat, normalizarCategoria({ ...cat, nombre, icono, presupuesto }));
+    Object.assign(cat, normalizarCategoria({ ...cat, nombre, icono, color, presupuesto }));
     guardarCategorias();
     return cat;
 }
@@ -403,6 +434,24 @@ function editarMovimiento(id, datos) {
 function eliminarMovimiento(id) {
     movimientos = movimientos.filter(m => m.id !== String(id));
     guardarMovimientos();
+}
+
+// Agrupa una lista ya ordenada por fecha. El neto del día ignora las transferencias.
+function agruparPorDia(lista) {
+    const grupos = [];
+    lista.forEach(m => {
+        let grupo = grupos[grupos.length - 1];
+        if (!grupo || grupo.fecha !== m.fecha) {
+            grupo = { fecha: m.fecha, movimientos: [], neto: 0, soloTransferencias: true };
+            grupos.push(grupo);
+        }
+        grupo.movimientos.push(m);
+        if (m.tipo !== 'transferencia') {
+            grupo.neto += m.tipo === 'ingreso' ? m.monto : -m.monto;
+            grupo.soloTransferencias = false;
+        }
+    });
+    return grupos;
 }
 
 function buscarYFiltrar(texto, tipo, periodo) {
@@ -477,21 +526,37 @@ function obtenerCategoriaMasGastada(periodo) {
 function obtenerDatosGrafico(periodo) {
     const datos = obtenerCategoriasConMonto('gasto', periodo)
         .filter(c => c.monto > 0)
-        .map(c => ({ etiqueta: `${c.icono} ${c.nombre}`, valor: c.monto, sinCategoria: false }));
+        .map(c => ({ etiqueta: c.nombre, valor: c.monto, color: c.color }));
     const sinCategoria = calcularMontoPorCategoria('gasto', periodo).get(null);
-    if (sinCategoria) datos.push({ etiqueta: 'Sin categoría', valor: sinCategoria, sinCategoria: true });
+    if (sinCategoria) datos.push({ etiqueta: 'Sin categoría', valor: sinCategoria, color: 'gris' });
     return datos;
 }
 
 // ===== Formateadores =====
+// Usa el signo menos tipográfico (−) en lugar del guion de Intl.
 function formatearMoneda(monto) {
     const valor = monto || 0;
-    return new Intl.NumberFormat('es-AR', {
+    const texto = new Intl.NumberFormat('es-AR', {
         style: 'currency',
         currency: 'ARS',
         minimumFractionDigits: Number.isInteger(valor) ? 0 : 2,
         maximumFractionDigits: 2
-    }).format(valor);
+    }).format(Math.abs(valor));
+    return valor < 0 ? `−\u00a0${texto}` : texto;
+}
+
+// "Hoy", "Ayer" o "Martes 20" (con el mes si no es el actual).
+function etiquetaDia(fechaISO) {
+    const hoy = fechaHoy();
+    const ayer = aFechaISO(new Date(Date.now() - 86400000));
+    if (fechaISO === hoy) return 'Hoy';
+    if (fechaISO === ayer) return 'Ayer';
+    const fecha = desdeFechaISO(fechaISO);
+    const opciones = fechaISO.slice(0, 7) === hoy.slice(0, 7)
+        ? { weekday: 'long', day: 'numeric' }
+        : { weekday: 'long', day: 'numeric', month: 'long' };
+    const texto = fecha.toLocaleDateString('es-AR', opciones).replace(',', '');
+    return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
 function formatearFecha(fechaISO) {
@@ -503,16 +568,16 @@ function formatearFecha(fechaISO) {
 }
 
 export {
-    TIPOS_CUENTA,
+    TIPOS_CUENTA, COLORES_CATEGORIA,
     inicializarDatos,
     obtenerGruposIconos, primerIcono,
     obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
     contarMovimientosDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
     obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria,
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
-    buscarYFiltrar,
+    buscarYFiltrar, agruparPorDia,
     periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
     calcularResumen, calcularPromedioDiario, calcularVariacionGastos,
     obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
-    formatearMoneda, formatearFecha
+    formatearMoneda, formatearFecha, etiquetaDia
 };

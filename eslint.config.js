@@ -10,6 +10,10 @@ export default [
             ecmaVersion: 'latest',
             sourceType: 'module',
             globals: { ...globals.browser, Chart: 'readonly' }
+        },
+        rules: {
+            // Descartar propiedades con { a, ...resto } es intencional.
+            'no-unused-vars': ['error', { ignoreRestSiblings: true }]
         }
     },
     {

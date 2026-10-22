@@ -242,6 +242,96 @@ describe('datos de ejemplo', () => {
     });
 });
 
+describe('recurrentes', () => {
+    const plantilla = (cuentaId, extra = {}) => ({ descripcion: 'Alquiler', monto: 1000, tipo: 'gasto', cuentaId, ...extra });
+
+    it('registra las ocurrencias vencidas hasta hoy, incluidas las atrasadas', async () => {
+        const { d, efectivo } = await conDosCuentas();
+        const r = d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-08-03' }), 'mensual');
+        const fechas = d.obtenerMovimientos().map(m => m.fecha);
+        expect(fechas).toEqual(['2026-10-03', '2026-09-03', '2026-08-03']);
+        expect(d.obtenerMovimientos().every(m => m.recurrenteId === r.id)).toBe(true);
+        expect(d.obtenerProximosVencimientos(30)).toMatchObject([{ fecha: '2026-11-03' }]);
+    });
+
+    it('no duplica al volver a abrir la app', async () => {
+        const { d, efectivo } = await conDosCuentas();
+        d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-09-15' }), 'mensual');
+        vi.resetModules();
+        const otra = await import('../js/datos.js');
+        await otra.inicializarDatos();
+        expect(otra.obtenerMovimientos()).toHaveLength(2);
+        vi.setSystemTime(new Date(2026, 10, 16, 12));
+        expect(otra.generarRecurrentes()).toBe(1);
+        expect(otra.generarRecurrentes()).toBe(0);
+    });
+
+    it('los mensuales del 31 caen el último día de los meses cortos y vuelven al 31', async () => {
+        vi.setSystemTime(new Date(2027, 2, 31, 12));
+        const { d, efectivo } = await conDosCuentas();
+        d.crearRecurrente(plantilla(efectivo.id, { fecha: '2027-01-31' }), 'mensual');
+        expect(d.obtenerMovimientos().map(m => m.fecha).reverse()).toEqual(['2027-01-31', '2027-02-28', '2027-03-31']);
+    });
+
+    it('los semanales se repiten cada 7 días y uno con fecha futura todavía no registra nada', async () => {
+        const { d, efectivo } = await conDosCuentas();
+        d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-08' }), 'semanal');
+        expect(d.obtenerMovimientos().map(m => m.fecha)).toEqual(['2026-10-22', '2026-10-15', '2026-10-08']);
+        d.crearRecurrente(plantilla(efectivo.id, { descripcion: 'Gym', fecha: '2026-11-01' }), 'mensual');
+        expect(d.obtenerMovimientos()).toHaveLength(3);
+        expect(d.obtenerProximosVencimientos(30).map(v => v.fecha)).toEqual(['2026-10-29', '2026-11-01']);
+    });
+
+    it('editar cambia las próximas ocurrencias y no permite fechas ya registradas', async () => {
+        const { d, efectivo } = await conDosCuentas();
+        const r = d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-03' }), 'mensual');
+        expect(() => d.editarRecurrente(r.id, plantilla(efectivo.id, { fecha: '2026-10-03' }), 'mensual')).toThrow('posterior');
+        d.editarRecurrente(r.id, plantilla(efectivo.id, { monto: 1500, fecha: '2026-11-10' }), 'mensual');
+        expect(d.obtenerMovimientos()[0].monto).toBe(1000);
+        expect(d.obtenerProximosVencimientos(30)).toMatchObject([{ fecha: '2026-11-10', recurrente: { monto: 1500 } }]);
+    });
+
+    it('eliminar conserva los movimientos registrados y bloquea borrar su cuenta mientras exista', async () => {
+        const { d, banco } = await conDosCuentas();
+        const r = d.crearRecurrente(plantilla(banco.id, { fecha: '2026-11-01' }), 'mensual');
+        expect(d.contarRecurrentesDeCuenta(banco.id)).toBe(1);
+        expect(d.eliminarCuenta(banco.id)).toBe(false);
+        d.eliminarRecurrente(r.id);
+        expect(d.eliminarCuenta(banco.id)).toBe(true);
+
+        const { d: d2, efectivo } = await conDosCuentas();
+        const r2 = d2.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-01' }), 'mensual');
+        d2.eliminarRecurrente(r2.id);
+        expect(d2.obtenerMovimientos()).toMatchObject([{ fecha: '2026-10-01', recurrenteId: null }]);
+    });
+
+    it('viajan en el respaldo y los respaldos viejos sin recurrentes siguen sirviendo', async () => {
+        const { d, efectivo } = await conDosCuentas();
+        d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-03' }), 'mensual');
+        const respaldo = JSON.parse(JSON.stringify(d.exportarRespaldo()));
+        const otra = await cargarDatos();
+        otra.reemplazarDatos(respaldo);
+        expect(otra.obtenerRecurrentes()).toHaveLength(1);
+        expect(otra.obtenerMovimientos()).toHaveLength(1);
+        expect(otra.obtenerMovimientos()[0].recurrenteId).toBe(otra.obtenerRecurrentes()[0].id);
+
+        const { recurrentes, ...viejo } = respaldo;
+        expect(recurrentes).toHaveLength(1);
+        const tercera = await cargarDatos();
+        expect(tercera.reemplazarDatos(viejo).recurrentes).toEqual([]);
+    });
+
+    it('los datos de ejemplo traen recurrentes sin duplicar lo ya registrado', async () => {
+        const d = await cargarDatos();
+        await d.cargarDatosDeEjemplo();
+        const total = d.obtenerMovimientos().length;
+        expect(d.obtenerRecurrentes().length).toBe(7);
+        expect(d.generarRecurrentes()).toBe(0);
+        expect(d.obtenerMovimientos()).toHaveLength(total);
+        expect(d.obtenerProximosVencimientos(30)[0]).toMatchObject({ fecha: '2026-11-01', recurrente: { descripcion: 'Sueldo' } });
+    });
+});
+
 describe('formato', () => {
     it('usa el signo menos tipográfico y decimales solo cuando hacen falta', async () => {
         const d = await cargarDatos();
@@ -256,5 +346,12 @@ describe('formato', () => {
         expect(d.etiquetaDia('2026-10-21')).toBe('Ayer');
         expect(d.etiquetaDia('2026-10-20')).toBe('Martes 20');
         expect(d.etiquetaDia('2026-09-15')).toBe('Martes 15 de septiembre');
+    });
+
+    it('describe fechas próximas', async () => {
+        const d = await cargarDatos();
+        expect(d.etiquetaProxima('2026-10-23')).toBe('Mañana');
+        expect(d.etiquetaProxima('2026-10-26')).toBe('En 4 días');
+        expect(d.etiquetaProxima('2026-11-03')).toBe('3 de noviembre');
     });
 });

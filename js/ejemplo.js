@@ -41,6 +41,17 @@ export function generarDatosDeEjemplo(semilla, hoy = new Date()) {
     ];
     const [banco, mp, efectivo, visa] = cuentas.map(c => c.id);
 
+    // Gastos e ingresos fijos: se cargan como recurrentes y sus movimientos quedan vinculados.
+    const fijos = [
+        { id: 'ejemplo-r-sueldo',   dia: 1,  tipo: 'ingreso',       descripcion: 'Sueldo',            monto: 1250000, cuenta: banco, categoria: 'Sueldo' },
+        { id: 'ejemplo-r-alquiler', dia: 3,  tipo: 'gasto',         descripcion: 'Alquiler',          monto: 380000,  cuenta: banco, categoria: 'Vivienda' },
+        { id: 'ejemplo-r-mp',       dia: 5,  tipo: 'transferencia', descripcion: 'Transferencia',     monto: 280000,  cuenta: banco, destino: mp },
+        { id: 'ejemplo-r-expensas', dia: 6,  tipo: 'gasto',         descripcion: 'Expensas',          monto: 95000,   cuenta: banco, categoria: 'Vivienda' },
+        { id: 'ejemplo-r-internet', dia: 12, tipo: 'gasto',         descripcion: 'Internet Fibertel', monto: 28000,   cuenta: mp,    categoria: 'Servicios' },
+        { id: 'ejemplo-r-netflix',  dia: 14, tipo: 'gasto',         descripcion: 'Netflix',           monto: 9500,    cuenta: visa,  categoria: 'Entretenimiento' },
+        { id: 'ejemplo-r-spotify',  dia: 14, tipo: 'gasto',         descripcion: 'Spotify',           monto: 4200,    cuenta: visa,  categoria: 'Entretenimiento' }
+    ];
+
     const movimientos = [];
     let creado = 1;
     const hoyISO = `${hoy.getFullYear()}-${pad(hoy.getMonth() + 1)}-${pad(hoy.getDate())}`;
@@ -56,6 +67,7 @@ export function generarDatosDeEjemplo(semilla, hoy = new Date()) {
             cuentaId,
             cuentaDestinoId: extra.destino ?? null,
             categoriaId: extra.categoria ? idCategoria(extra.categoria) : null,
+            recurrenteId: extra.recurrente ?? null,
             creado: creado++
         });
     }
@@ -72,20 +84,19 @@ export function generarDatosDeEjemplo(semilla, hoy = new Date()) {
             if (cuenta === visa && dia(d) <= hoyISO) deudaTarjeta += monto;
         };
 
-        agregar(dia(1), 'ingreso', 'Sueldo', 1250000, banco, { categoria: 'Sueldo' });
-        gasto(3, 'Alquiler', 380000, banco, 'Vivienda');
-        gasto(6, 'Expensas', 95000, banco, 'Vivienda');
-        agregar(dia(5), 'transferencia', 'Transferencia', 280000, banco, { destino: mp });
-        agregar(dia(7), 'transferencia', 'Extracción', 40000, banco, { destino: efectivo });
-
         // El resumen de la tarjeta del mes anterior se paga con el banco.
         if (deudaTarjeta > 0) {
             agregar(dia(10), 'transferencia', 'Pago tarjeta Visa', deudaTarjeta, banco, { destino: visa });
             deudaTarjeta = 0;
         }
 
+        fijos.forEach(f => {
+            agregar(dia(f.dia), f.tipo, f.descripcion, f.monto, f.cuenta, { categoria: f.categoria, destino: f.destino, recurrente: f.id });
+            if (f.tipo === 'gasto' && f.cuenta === visa && dia(f.dia) <= hoyISO) deudaTarjeta += f.monto;
+        });
+        agregar(dia(7), 'transferencia', 'Extracción', 40000, banco, { destino: efectivo });
+
         gasto(8, 'Edenor', entre(32000, 42000), banco, 'Servicios');
-        gasto(12, 'Internet Fibertel', 28000, mp, 'Servicios');
         gasto(15, 'Metrogas', entre(15000, 22000), banco, 'Servicios');
 
         [2, 9, 16, 23, 30].forEach(d => {
@@ -98,8 +109,6 @@ export function generarDatosDeEjemplo(semilla, hoy = new Date()) {
         gasto(18, 'Carga SUBE', 10000, mp, 'Transporte');
         gasto(diaAzar(9, 21), 'Uber', entre(4000, 9000), visa, 'Transporte');
 
-        gasto(14, 'Netflix', 9500, visa, 'Entretenimiento');
-        gasto(14, 'Spotify', 4200, visa, 'Entretenimiento');
         gasto(diaAzar(12, 20), elegir(['Cena con amigos', 'Cine', 'Bar']), entre(12000, 28000), visa, 'Entretenimiento');
 
         gasto(diaAzar(4, 23), 'Farmacia', entre(8000, 24000), mp, 'Salud');
@@ -111,5 +120,22 @@ export function generarDatosDeEjemplo(semilla, hoy = new Date()) {
         gasto(25, 'Curso online', 24000, mp, 'Educación');
     }
 
-    return { cuentas, categorias, movimientos };
+    const primerMes = new Date(hoy.getFullYear(), hoy.getMonth() - 2, 1);
+    const recurrentes = fijos.map(f => {
+        const registrados = movimientos.filter(m => m.recurrenteId === f.id).map(m => m.fecha);
+        return {
+            id: f.id,
+            descripcion: f.descripcion,
+            monto: f.monto,
+            tipo: f.tipo,
+            cuentaId: f.cuenta,
+            cuentaDestinoId: f.destino ?? null,
+            categoriaId: f.categoria ? idCategoria(f.categoria) : null,
+            inicio: `${primerMes.getFullYear()}-${pad(primerMes.getMonth() + 1)}-${pad(f.dia)}`,
+            frecuencia: 'mensual',
+            ultima: registrados.length ? registrados[registrados.length - 1] : null
+        };
+    });
+
+    return { cuentas, categorias, movimientos, recurrentes };
 }

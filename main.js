@@ -5,14 +5,16 @@ import {
     inicializarDatos,
     obtenerGruposIconos, primerIcono,
     obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
-    contarMovimientosDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
+    contarMovimientosDeCuenta, contarRecurrentesDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
     obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria,
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
     buscarYFiltrar, agruparPorDia,
+    obtenerRecurrentes, obtenerRecurrentePorId, crearRecurrente, editarRecurrente, eliminarRecurrente,
+    obtenerProximosVencimientos, proximaFecha,
     periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
     calcularResumen, calcularPromedioDiario, calcularVariacionGastos, calcularSerieMensual,
     obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
-    formatearMoneda, etiquetaDia,
+    formatearMoneda, etiquetaDia, etiquetaProxima,
     validarRespaldo, reemplazarDatos, exportarRespaldo, exportarCSV,
     cargarDatosDeEjemplo, reiniciarDatos, hayMovimientos
 } from './js/datos.js';
@@ -74,6 +76,7 @@ function renderizarTodo() {
     renderizarPeriodo();
     renderizarInicio();
     renderizarMovimientos();
+    renderizarRecurrentes();
     renderizarCuentas();
     renderizarPresupuestos();
     renderizarAnalisis();
@@ -126,7 +129,7 @@ function configurarPrivacidad() {
 // Botones que se crean al renderizar también navegan, abren modales o editan.
 function configurarClicsGlobales() {
     document.addEventListener('click', e => {
-        const objetivo = e.target.closest('[data-seccion], [data-nuevo-movimiento], [data-alternar-tema], [data-periodo], [data-editar-movimiento], [data-editar-cuenta], [data-editar-categoria], [data-cargar-ejemplo]');
+        const objetivo = e.target.closest('[data-seccion], [data-nuevo-movimiento], [data-alternar-tema], [data-periodo], [data-editar-movimiento], [data-editar-cuenta], [data-editar-categoria], [data-cargar-ejemplo], [data-editar-recurrente], [data-nuevo-recurrente]');
         if (!objetivo) return;
         const d = objetivo.dataset;
         if (d.seccion) irASeccion(d.seccion);
@@ -137,6 +140,8 @@ function configurarClicsGlobales() {
         else if (d.editarCuenta) abrirModalCuenta(d.editarCuenta);
         else if (d.editarCategoria) abrirModalCategoria(d.editarCategoria);
         else if ('cargarEjemplo' in d) cargarEjemplo();
+        else if (d.editarRecurrente) abrirModalMovimiento(null, null, { recurrenteId: d.editarRecurrente });
+        else if ('nuevoRecurrente' in d) abrirModalMovimiento(null, 'gasto', { repetir: 'mensual' });
     });
 }
 
@@ -172,7 +177,7 @@ function mostrarSkeletons() {
     const bloques = n => '<div class="skeleton"></div>'.repeat(n);
     const filas = n => '<li class="skeleton"></li>'.repeat(n);
     ['ultimosMovimientos', 'listaMovimientos'].forEach(id => { $(id).innerHTML = bloques(4); });
-    ['resumenPresupuestos', 'listaCuentas', 'listaCategorias'].forEach(id => { $(id).innerHTML = filas(3); });
+    ['resumenPresupuestos', 'proximosVencimientos', 'listaRecurrentes', 'listaCuentas', 'listaCategorias'].forEach(id => { $(id).innerHTML = filas(3); });
 }
 
 function htmlVacio(icono, titulo, sub, etiqueta = 'div', extra = '') {
@@ -189,7 +194,8 @@ const tile = (icono, color) =>
 
 const nombreCuenta = id => esc(obtenerCuentaPorId(id)?.nombre ?? 'Cuenta eliminada');
 
-function filaMovimiento(m) {
+// Ícono, detalle y monto de un movimiento (o de la plantilla de un recurrente).
+function partesMovimiento(m) {
     let icono, color, meta, monto, claseMonto;
     if (m.tipo === 'transferencia') {
         [icono, color] = ['ph-arrows-left-right', 'gris'];
@@ -204,14 +210,52 @@ function filaMovimiento(m) {
         monto = esIngreso ? formatearConSigno(m.monto) : formatearMoneda(-m.monto);
         claseMonto = esIngreso ? 'ingreso' : '';
     }
+    return { icono, color, meta, monto, claseMonto };
+}
+
+const ICONO_RECURRENTE = '<i class="ph ph-repeat icono-recurrente" aria-hidden="true"></i><span class="visualmente-oculto">Recurrente. </span>';
+
+function filaMovimiento(m) {
+    const { icono, color, meta, monto, claseMonto } = partesMovimiento(m);
     return `
         <button class="fila" type="button" data-editar-movimiento="${esc(m.id)}">
             ${tile(icono, color)}
             <span class="fila-texto">
                 <span class="fila-nombre">${esc(m.descripcion)}</span>
-                <span class="fila-meta">${meta}</span>
+                <span class="fila-meta">${m.recurrenteId ? ICONO_RECURRENTE : ''}${meta}</span>
             </span>
             <span class="fila-monto monto ${claseMonto}">${monto}</span>
+        </button>`;
+}
+
+const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+function textoFrecuencia(r) {
+    if (r.frecuencia === 'semanal') {
+        const [a, m, d] = r.inicio.split('-').map(Number);
+        return `Cada ${DIAS_SEMANA[new Date(a, m - 1, d).getDay()]}`;
+    }
+    return `Cada mes, el día ${Number(r.inicio.slice(8, 10))}`;
+}
+
+// conDetalle: la lista completa muestra la frecuencia; Inicio, cuándo vence.
+function filaRecurrente(r, fecha, conDetalle) {
+    const { icono, color, monto, claseMonto } = partesMovimiento(r);
+    const cuenta = r.tipo === 'transferencia'
+        ? `${nombreCuenta(r.cuentaId)} → ${nombreCuenta(r.cuentaDestinoId)}`
+        : nombreCuenta(r.cuentaId);
+    const meta = conDetalle ? `${textoFrecuencia(r)} · ${cuenta}` : `${etiquetaProxima(fecha)} · ${cuenta}`;
+    return `
+        <button class="fila" type="button" data-editar-recurrente="${esc(r.id)}">
+            ${tile(icono, color)}
+            <span class="fila-texto">
+                <span class="fila-nombre">${esc(r.descripcion)}</span>
+                <span class="fila-meta">${meta}</span>
+            </span>
+            <span class="fila-lado">
+                <span class="fila-monto monto ${claseMonto}">${monto}</span>
+                ${conDetalle ? `<span class="fila-meta">${etiquetaProxima(fecha)}</span>` : ''}
+            </span>
         </button>`;
 }
 
@@ -376,6 +420,28 @@ function configurarChips(idGrupo, alElegir) {
         });
         alElegir(btn);
     });
+}
+
+// ===== Recurrentes =====
+function renderizarProximos() {
+    const proximos = obtenerProximosVencimientos(30).slice(0, 4);
+    $('proximosVencimientos').innerHTML = proximos.length
+        ? proximos.map(v => `<li>${filaRecurrente(v.recurrente, v.fecha, false)}</li>`).join('')
+        : htmlVacio('ph-repeat', 'Sin vencimientos en los próximos 30 días', 'Marcá un movimiento como "Se repite" y se registra solo.', 'li');
+}
+
+function renderizarRecurrentes() {
+    renderizarProximos();
+    const lista = obtenerRecurrentes();
+    // Equivalente mensual: las semanales cuentan 52/12 veces por mes.
+    const porMes = tipo => lista
+        .filter(r => r.tipo === tipo)
+        .reduce((acc, r) => acc + (r.frecuencia === 'semanal' ? (r.monto * 52) / 12 : r.monto), 0);
+    $('recIngresos').textContent = formatearConSigno(Math.round(porMes('ingreso')));
+    $('recGastos').textContent = formatearMoneda(Math.round(porMes('gasto')));
+    $('listaRecurrentes').innerHTML = lista.length
+        ? lista.map(r => `<li>${filaRecurrente(r, proximaFecha(r), true)}</li>`).join('')
+        : htmlVacio('ph-repeat', 'Todavía no hay recurrentes', 'Creá uno con + o marcá "Se repite" al registrar un movimiento.', 'li');
 }
 
 // ===== Cuentas =====
@@ -643,7 +709,8 @@ const opcionesCuentas = () => obtenerCuentas()
     .map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`)
     .join('');
 
-async function abrirModalMovimiento(id, tipoInicial = 'gasto') {
+// Sirve para movimientos y para recurrentes: con opciones.recurrenteId edita la plantilla.
+async function abrirModalMovimiento(id, tipoInicial = 'gasto', opciones = {}) {
     if (obtenerCuentas().length === 0) {
         const crear = await confirmar({
             titulo: 'Primero creá una cuenta',
@@ -653,7 +720,9 @@ async function abrirModalMovimiento(id, tipoInicial = 'gasto') {
         if (crear) abrirModalCuenta();
         return;
     }
-    const m = id ? obtenerMovimientoPorId(id) : null;
+    const r = opciones.recurrenteId ? obtenerRecurrentePorId(opciones.recurrenteId) : null;
+    if (opciones.recurrenteId && !r) return;
+    const m = r ?? (id ? obtenerMovimientoPorId(id) : null);
     if (id && !m) return;
     $('formMovimiento').reset();
     $('formMovimiento').querySelectorAll('[aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
@@ -661,17 +730,24 @@ async function abrirModalMovimiento(id, tipoInicial = 'gasto') {
     $('movimientoCuentaDestino').innerHTML = opcionesCuentas();
     seleccionarTipo(m ? m.tipo : tipoInicial);
     $('btnEliminarMovimiento').hidden = !m;
+    $('recurrenteId').value = r?.id ?? '';
+    // Repetir solo se elige al crear; un recurrente existente no puede dejar de serlo desde acá.
+    $('movimientoRepetir').innerHTML = (r ? '' : '<option value="">No se repite</option>') +
+        '<option value="mensual">Cada mes</option><option value="semanal">Cada semana</option>';
+    $('movimientoRepetir').value = r?.frecuencia ?? opciones.repetir ?? '';
+    $('campoRepetir').hidden = Boolean(m && !r);
+    $('etiquetaFecha').textContent = r ? 'Próxima fecha' : 'Fecha';
     if (m) {
-        $('tituloModalMovimiento').textContent = 'Editar movimiento';
-        $('movimientoId').value          = m.id;
+        $('tituloModalMovimiento').textContent = r ? 'Editar recurrente' : 'Editar movimiento';
+        $('movimientoId').value          = r ? '' : m.id;
         $('movimientoDescripcion').value = m.descripcion;
         $('movimientoMonto').value       = m.monto;
-        $('movimientoFecha').value       = m.fecha;
+        $('movimientoFecha').value       = r ? proximaFecha(r) : m.fecha;
         if (obtenerCuentaPorId(m.cuentaId)) $('movimientoCuenta').value = m.cuentaId;
         if (m.cuentaDestinoId && obtenerCuentaPorId(m.cuentaDestinoId)) $('movimientoCuentaDestino').value = m.cuentaDestinoId;
         if (m.categoriaId && obtenerCategoriaPorId(m.categoriaId)) $('movimientoCategoria').value = m.categoriaId;
     } else {
-        $('tituloModalMovimiento').textContent = 'Nuevo movimiento';
+        $('tituloModalMovimiento').textContent = opciones.repetir ? 'Nuevo recurrente' : 'Nuevo movimiento';
         $('movimientoId').value    = '';
         $('movimientoFecha').value = fechaHoy();
         const cuentas = obtenerCuentas();
@@ -728,6 +804,8 @@ function configurarFormularioMovimiento() {
         const cuentaDestinoId = $('movimientoCuentaDestino').value;
         const categoriaId     = $('movimientoCategoria').value;
         const fecha           = $('movimientoFecha').value;
+        const recurrenteId    = $('recurrenteId').value;
+        const repetir         = $('movimientoRepetir').value;
         const esTransferencia = tipo === 'transferencia';
         if (!(monto > 0)) return errorEnCampo($('movimientoMonto'), 'Ingresá un monto mayor a cero');
         if (!esTransferencia && !descripcion.trim()) return errorEnCampo($('movimientoDescripcion'), 'Escribí una descripción');
@@ -740,7 +818,21 @@ function configurarFormularioMovimiento() {
         if (!esFechaISO(fecha)) return errorEnCampo($('movimientoFecha'), 'Elegí una fecha válida');
 
         const datos = { descripcion, monto, tipo, fecha, cuentaId, cuentaDestinoId, categoriaId };
-        if (id) {
+        if (recurrenteId) {
+            try {
+                editarRecurrente(recurrenteId, datos, repetir);
+            } catch (error) {
+                return errorEnCampo($('movimientoFecha'), error.message);
+            }
+            mostrarToast('Recurrente actualizado');
+        } else if (repetir) {
+            const antes = obtenerMovimientos().length;
+            crearRecurrente(datos, repetir);
+            const registrados = obtenerMovimientos().length - antes;
+            mostrarToast(registrados > 1
+                ? `Recurrente creado · ${registrados} movimientos registrados`
+                : 'Recurrente creado: se registra solo');
+        } else if (id) {
             editarMovimiento(id, datos);
             mostrarToast('Movimiento actualizado');
         } else {
@@ -752,6 +844,20 @@ function configurarFormularioMovimiento() {
     });
     $('btnEliminarMovimiento').addEventListener('click', async () => {
         const id = $('movimientoId').value;
+        const recurrenteId = $('recurrenteId').value;
+        if (recurrenteId) {
+            const ok = await confirmar({
+                titulo: '¿Eliminar recurrente?',
+                texto: 'Deja de registrarse. Los movimientos que ya se registraron se conservan.',
+                aceptar: 'Eliminar',
+                peligro: true
+            });
+            if (!ok) return;
+            eliminarRecurrente(recurrenteId);
+            cerrarModal('modalMovimiento');
+            mostrarToast('Recurrente eliminado');
+            return renderizarTodo();
+        }
         const ok = await confirmar({
             titulo: '¿Eliminar movimiento?',
             texto: 'Esta acción no se puede deshacer.',
@@ -806,10 +912,15 @@ function configurarFormularioCuenta() {
     $('btnEliminarCuenta').addEventListener('click', async () => {
         const id = $('cuentaId').value;
         const usos = contarMovimientosDeCuenta(id);
-        if (usos > 0) {
+        const fijos = contarRecurrentesDeCuenta(id);
+        if (usos > 0 || fijos > 0) {
+            const partes = [
+                usos ? `${usos} ${usos === 1 ? 'movimiento' : 'movimientos'}` : '',
+                fijos ? `${fijos} ${fijos === 1 ? 'recurrente' : 'recurrentes'}` : ''
+            ].filter(Boolean).join(' y ');
             await confirmar({
                 titulo: 'No se puede eliminar',
-                texto: `La cuenta tiene ${usos} ${usos === 1 ? 'movimiento' : 'movimientos'}. Eliminalos o pasalos a otra cuenta primero.`,
+                texto: `La cuenta tiene ${partes}. Eliminalos o pasalos a otra cuenta primero.`,
                 aceptar: 'Entendido',
                 soloAceptar: true
             });

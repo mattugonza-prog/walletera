@@ -3,7 +3,7 @@
 // - Archivos propios: primero la red (para ver siempre la última versión), caché si no hay conexión.
 // - Recursos externos (Chart.js, tipografía): caché primero y se actualiza en segundo plano.
 
-const CACHE = 'walletera-v1';
+const CACHE = 'walletera-v2';
 const ARCHIVOS = [
     './',
     './index.html',

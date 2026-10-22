@@ -8,9 +8,9 @@ Billetera personal para ordenar tu plata: cuentas, transferencias, presupuestos 
 
 ![Inicio en escritorio](docs/capturas/escritorio-inicio.png)
 
-| Inicio | Movimientos | Presupuestos | Nuevo movimiento |
-| --- | --- | --- | --- |
-| ![Inicio](docs/capturas/celular-inicio.png) | ![Movimientos](docs/capturas/celular-movimientos.png) | ![Presupuestos](docs/capturas/celular-presupuestos.png) | ![Nuevo movimiento](docs/capturas/celular-nuevo-movimiento.png) |
+| Inicio | Movimientos | Recurrentes | Presupuestos | Nuevo movimiento |
+| --- | --- | --- | --- | --- |
+| ![Inicio](docs/capturas/celular-inicio.png) | ![Movimientos](docs/capturas/celular-movimientos.png) | ![Recurrentes](docs/capturas/celular-recurrentes.png) | ![Presupuestos](docs/capturas/celular-presupuestos.png) | ![Nuevo movimiento](docs/capturas/celular-nuevo-movimiento.png) |
 
 | Análisis | Modo claro |
 | --- | --- |
@@ -20,6 +20,7 @@ Billetera personal para ordenar tu plata: cuentas, transferencias, presupuestos 
 
 - **Cuentas**: efectivo, banco, billetera virtual y tarjeta de crédito, cada una con su saldo inicial. El saldo total es la suma de todas.
 - **Movimientos**: gastos, ingresos y transferencias entre cuentas (que no cuentan como gasto ni ingreso). Agrupados por día, con búsqueda y filtros.
+- **Recurrentes**: alquiler, sueldo, suscripciones. Se registran solos cada mes o cada semana, incluso los que vencieron mientras la app estaba cerrada, y en Inicio aparecen los próximos vencimientos.
 - **Presupuestos mensuales** por categoría, con lo que queda o lo que se excedió y una barra que cambia de color al acercarse al límite.
 - **Categorías** de gasto y de ingreso, con ícono y color a elección.
 - **Selector de mes**: todo el resumen, la lista y los gráficos se pueden ver mes a mes.
@@ -68,7 +69,7 @@ También sirve cualquier otro servidor estático, como la extensión Live Server
 ## Tests y calidad
 
 ```bash
-npm test           # Vitest: saldos, períodos, migraciones, respaldo, CSV, datos de ejemplo
+npm test           # Vitest: saldos, períodos, recurrentes, migraciones, respaldo, CSV, datos de ejemplo
 npm run lint       # ESLint
 ```
 
@@ -86,3 +87,4 @@ Walletera nació como proyecto final de un curso de JavaScript, un simulador de 
 2. Modelo de billetera con cuentas y transferencias.
 3. Rediseño completo.
 4. Tests, PWA, datos de ejemplo y publicación.
+5. Movimientos recurrentes.

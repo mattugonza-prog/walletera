@@ -40,6 +40,7 @@
         <nav class="lateral-nav" aria-label="Navegación principal">
             <button class="nav-item activa" type="button" data-seccion="inicio" aria-current="page"><i class="ph ph-house" aria-hidden="true"></i>Inicio</button>
             <button class="nav-item" type="button" data-seccion="movimientos"><i class="ph ph-list-bullets" aria-hidden="true"></i>Movimientos</button>
+            <button class="nav-item" type="button" data-seccion="recurrentes"><i class="ph ph-repeat" aria-hidden="true"></i>Recurrentes</button>
             <button class="nav-item" type="button" data-seccion="cuentas"><i class="ph ph-wallet" aria-hidden="true"></i>Cuentas</button>
             <button class="nav-item" type="button" data-seccion="presupuestos"><i class="ph ph-target" aria-hidden="true"></i>Presupuestos</button>
             <button class="nav-item" type="button" data-seccion="analisis"><i class="ph ph-chart-pie-slice" aria-hidden="true"></i>Análisis</button>
@@ -126,6 +127,13 @@
                         </div>
                         <div id="ultimosMovimientos"></div>
                     </section>
+                    <section class="bloque" aria-labelledby="tituloProximos">
+                        <div class="fila-titulo">
+                            <h2 id="tituloProximos">Próximos</h2>
+                            <button class="btn-link" type="button" data-seccion="recurrentes">Ver todos</button>
+                        </div>
+                        <ul class="lista" id="proximosVencimientos"></ul>
+                    </section>
                     <section class="bloque" aria-labelledby="tituloPresupuestosInicio">
                         <div class="fila-titulo">
                             <h2 id="tituloPresupuestosInicio">Presupuestos</h2>
@@ -141,9 +149,14 @@
         <section class="seccion" id="movimientos" aria-labelledby="tituloMovimientos">
             <header class="encabezado">
                 <h1 id="tituloMovimientos">Movimientos</h1>
-                <button class="btn-icono" type="button" id="btnBuscar" aria-label="Buscar" aria-expanded="false" aria-controls="campoBuscar">
-                    <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
-                </button>
+                <div class="encabezado-acciones">
+                    <button class="btn-icono solo-movil" type="button" data-seccion="recurrentes" aria-label="Recurrentes">
+                        <i class="ph ph-repeat" aria-hidden="true"></i>
+                    </button>
+                    <button class="btn-icono" type="button" id="btnBuscar" aria-label="Buscar" aria-expanded="false" aria-controls="campoBuscar">
+                        <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+                    </button>
+                </div>
             </header>
             <label class="buscador" id="campoBuscar" hidden>
                 <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
@@ -165,6 +178,20 @@
                 <button class="chip" type="button" data-filtro="transferencia" aria-pressed="false">Transferencias</button>
             </div>
             <div id="listaMovimientos"></div>
+        </section>
+
+        <!-- ===== Recurrentes ===== -->
+        <section class="seccion" id="recurrentes" aria-labelledby="tituloRecurrentes">
+            <header class="encabezado">
+                <h1 id="tituloRecurrentes">Recurrentes</h1>
+                <button class="btn-icono" type="button" data-nuevo-recurrente aria-label="Nuevo recurrente"><i class="ph ph-plus" aria-hidden="true"></i></button>
+            </header>
+            <p class="texto-suave">Gastos e ingresos fijos, como el alquiler, el sueldo o una suscripción. Se registran solos en cada fecha.</p>
+            <div class="dos-columnas">
+                <div class="tarjeta dato"><span class="dato-label">Ingresos fijos por mes</span><span class="dato-valor positivo monto" id="recIngresos"></span></div>
+                <div class="tarjeta dato"><span class="dato-label">Gastos fijos por mes</span><span class="dato-valor monto" id="recGastos"></span></div>
+            </div>
+            <ul class="lista tarjeta" id="listaRecurrentes"></ul>
         </section>
 
         <!-- ===== Cuentas ===== -->
@@ -336,10 +363,17 @@
                     <select id="movimientoCategoria"></select>
                 </label>
             </div>
-            <label class="campo">
-                <span>Fecha</span>
-                <input type="date" id="movimientoFecha">
-            </label>
+            <div class="dos-columnas">
+                <label class="campo">
+                    <span id="etiquetaFecha">Fecha</span>
+                    <input type="date" id="movimientoFecha">
+                </label>
+                <label class="campo" id="campoRepetir">
+                    <span>Se repite</span>
+                    <select id="movimientoRepetir"></select>
+                </label>
+            </div>
+            <input type="hidden" id="recurrenteId">
             <div class="formulario-acciones">
                 <button class="btn btn-peligro-texto" type="button" id="btnEliminarMovimiento" hidden><i class="ph ph-trash" aria-hidden="true"></i> Eliminar</button>
                 <button class="btn btn-primario" type="submit">Guardar</button>

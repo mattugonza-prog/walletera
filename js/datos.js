@@ -7,6 +7,7 @@ const CLAVES = {
     cuentas:       'walletera_cuentas',
     categorias:    'walletera_categorias',
     movimientos:   'walletera_movimientos',
+    recurrentes:   'walletera_recurrentes',
     version:       'walletera_version'
 };
 
@@ -58,6 +59,7 @@ const EMOJI_A_ICONO = {
 let cuentas       = [];
 let categorias    = [];
 let movimientos   = [];
+let recurrentes   = [];
 let gruposIconos  = [];
 
 // ===== Helpers de persistencia =====
@@ -77,6 +79,7 @@ function escribir(clave, valor) {
 const guardarCuentas     = () => escribir(CLAVES.cuentas, cuentas);
 const guardarCategorias  = () => escribir(CLAVES.categorias, categorias);
 const guardarMovimientos = () => escribir(CLAVES.movimientos, movimientos);
+const guardarRecurrentes = () => escribir(CLAVES.recurrentes, recurrentes);
 
 function generarId() {
     if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
@@ -246,6 +249,7 @@ async function inicializarDatos() {
     cuentas       = leer(CLAVES.cuentas, []);
     categorias    = leer(CLAVES.categorias, []);
     movimientos   = leer(CLAVES.movimientos, []);
+    recurrentes   = leer(CLAVES.recurrentes, []);
     await cargarIconos();
 
     const sinDatos = categorias.length === 0 && movimientos.length === 0;
@@ -259,6 +263,7 @@ async function inicializarDatos() {
         cuentas = [{ id: generarId(), nombre: 'Efectivo', tipo: 'efectivo', saldoInicial: 0 }];
         guardarCuentas();
     }
+    generarRecurrentes();
 }
 
 async function cargarJSON(ruta) {
@@ -297,7 +302,7 @@ function normalizarCuenta(c) {
     };
 }
 
-function normalizarMovimiento(m, idsCuentas, categoriasPorId) {
+function normalizarMovimiento(m, idsCuentas, categoriasPorId, idsRecurrentes = new Set()) {
     if (!m || typeof m.descripcion !== 'string' || !['gasto', 'ingreso', 'transferencia'].includes(m.tipo)) return null;
     const monto = Number(m.monto);
     if (!Number.isFinite(monto) || monto <= 0 || !esFechaISO(m.fecha)) return null;
@@ -316,7 +321,21 @@ function normalizarMovimiento(m, idsCuentas, categoriasPorId) {
         cuentaId,
         cuentaDestinoId: destino,
         categoriaId: cat && cat.tipo === m.tipo ? cat.id : null,
+        recurrenteId: idsRecurrentes.has(String(m.recurrenteId)) ? String(m.recurrenteId) : null,
         creado: Number(m.creado) || 0
+    };
+}
+
+function normalizarRecurrente(r, idsCuentas, categoriasPorId) {
+    if (!r || !FRECUENCIAS.includes(r.frecuencia)) return null;
+    const base = normalizarMovimiento({ ...r, fecha: r.inicio }, idsCuentas, categoriasPorId);
+    if (!base) return null;
+    const { fecha, recurrenteId, creado, ...plantilla } = base;
+    return {
+        ...plantilla,
+        inicio: fecha,
+        frecuencia: r.frecuencia,
+        ultima: esFechaISO(r.ultima) ? r.ultima : null
     };
 }
 
@@ -331,13 +350,19 @@ function validarRespaldo(datos) {
     const categoriasValidas = datos.categorias.map(normalizarCategoria).filter(Boolean);
     const idsCuentas = new Set(cuentasValidas.map(c => c.id));
     const categoriasPorId = new Map(categoriasValidas.map(c => [c.id, c]));
+    // Los respaldos anteriores a los recurrentes no traen esa lista.
+    const recurrentesValidos = (Array.isArray(datos.recurrentes) ? datos.recurrentes : [])
+        .map(r => normalizarRecurrente(r, idsCuentas, categoriasPorId))
+        .filter(Boolean);
+    const idsRecurrentes = new Set(recurrentesValidos.map(r => r.id));
     const movimientosValidos = datos.movimientos
-        .map(m => normalizarMovimiento(m, idsCuentas, categoriasPorId))
+        .map(m => normalizarMovimiento(m, idsCuentas, categoriasPorId, idsRecurrentes))
         .filter(Boolean);
     return {
         cuentas: cuentasValidas,
         categorias: categoriasValidas,
         movimientos: movimientosValidos,
+        recurrentes: recurrentesValidos,
         descartados: datos.movimientos.length - movimientosValidos.length
     };
 }
@@ -347,9 +372,12 @@ function reemplazarDatos(datos) {
     cuentas = validos.cuentas;
     categorias = validos.categorias;
     movimientos = validos.movimientos;
+    recurrentes = validos.recurrentes;
     guardarCuentas();
     guardarCategorias();
     guardarMovimientos();
+    guardarRecurrentes();
+    generarRecurrentes();
     return validos;
 }
 
@@ -360,7 +388,8 @@ function exportarRespaldo() {
         exportado: new Date().toISOString(),
         cuentas,
         categorias,
-        movimientos
+        movimientos,
+        recurrentes
     };
 }
 
@@ -399,7 +428,7 @@ async function reiniciarDatos() {
     Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
         .filter(clave => clave.startsWith('walletera_respaldo_'))
         .forEach(clave => localStorage.removeItem(clave));
-    [CLAVES.cuentas, CLAVES.categorias, CLAVES.movimientos].forEach(clave => localStorage.removeItem(clave));
+    [CLAVES.cuentas, CLAVES.categorias, CLAVES.movimientos, CLAVES.recurrentes].forEach(clave => localStorage.removeItem(clave));
     await inicializarDatos();
 }
 
@@ -445,15 +474,20 @@ function editarCuenta(id, datos) {
     return cuenta;
 }
 
+const usaCuenta = clave => m => m.cuentaId === clave || m.cuentaDestinoId === clave;
+
 function contarMovimientosDeCuenta(id) {
-    const clave = String(id);
-    return movimientos.filter(m => m.cuentaId === clave || m.cuentaDestinoId === clave).length;
+    return movimientos.filter(usaCuenta(String(id))).length;
+}
+
+function contarRecurrentesDeCuenta(id) {
+    return recurrentes.filter(usaCuenta(String(id))).length;
 }
 
 // Una cuenta con movimientos no se elimina: borrarla cambiaría el saldo total
 // y dejaría transferencias sin origen o destino.
 function eliminarCuenta(id) {
-    if (contarMovimientosDeCuenta(id) > 0) return false;
+    if (contarMovimientosDeCuenta(id) > 0 || contarRecurrentesDeCuenta(id) > 0) return false;
     cuentas = cuentas.filter(c => c.id !== String(id));
     guardarCuentas();
     return true;
@@ -505,9 +539,10 @@ function editarCategoria(id, { nombre, icono, color, presupuesto }) {
 function eliminarCategoria(id) {
     const clave = String(id);
     categorias = categorias.filter(c => c.id !== clave);
-    movimientos.forEach(m => { if (m.categoriaId === clave) m.categoriaId = null; });
+    [...movimientos, ...recurrentes].forEach(m => { if (m.categoriaId === clave) m.categoriaId = null; });
     guardarCategorias();
     guardarMovimientos();
+    guardarRecurrentes();
 }
 
 // ===== Movimientos =====
@@ -573,6 +608,101 @@ function agruparPorDia(lista) {
         }
     });
     return grupos;
+}
+
+// ===== Recurrentes =====
+// Un recurrente es una plantilla de movimiento con frecuencia. Cada vez que se abre
+// la app se registran las ocurrencias vencidas hasta hoy; "ultima" evita duplicarlas.
+const FRECUENCIAS = ['mensual', 'semanal'];
+const MAX_OCURRENCIAS_POR_CARGA = 120;
+
+// Las mensuales mantienen el día de inicio y se ajustan al último día de los meses cortos.
+function fechaSiguiente(r, fechaISO) {
+    const fecha = desdeFechaISO(fechaISO);
+    if (r.frecuencia === 'semanal') {
+        fecha.setDate(fecha.getDate() + 7);
+        return aFechaISO(fecha);
+    }
+    const diaBase = Number(r.inicio.slice(8, 10));
+    const siguiente = new Date(fecha.getFullYear(), fecha.getMonth() + 1, 1);
+    const ultimoDia = new Date(siguiente.getFullYear(), siguiente.getMonth() + 1, 0).getDate();
+    siguiente.setDate(Math.min(diaBase, ultimoDia));
+    return aFechaISO(siguiente);
+}
+
+const proximaFecha = r => (r.ultima ? fechaSiguiente(r, r.ultima) : r.inicio);
+
+function generarRecurrentes(hasta = fechaHoy()) {
+    let generados = 0;
+    recurrentes.forEach(r => {
+        let fecha = proximaFecha(r);
+        let vueltas = 0;
+        while (fecha <= hasta && vueltas++ < MAX_OCURRENCIAS_POR_CARGA) {
+            const { id, inicio, frecuencia, ultima, ...plantilla } = r;
+            movimientos.push({ ...plantilla, id: generarId(), fecha, recurrenteId: id, creado: Date.now() + generados });
+            r.ultima = fecha;
+            generados++;
+            fecha = fechaSiguiente(r, fecha);
+        }
+    });
+    if (generados) {
+        guardarMovimientos();
+        guardarRecurrentes();
+    }
+    return generados;
+}
+
+function obtenerRecurrentes() {
+    return [...recurrentes].sort((a, b) => proximaFecha(a).localeCompare(proximaFecha(b)));
+}
+
+function obtenerRecurrentePorId(id) {
+    return recurrentes.find(r => r.id === String(id));
+}
+
+function crearRecurrente(datos, frecuencia) {
+    const { fecha, ...plantilla } = datosMovimiento(datos);
+    const nuevo = { id: generarId(), ...plantilla, inicio: fecha, frecuencia, ultima: null };
+    recurrentes.push(nuevo);
+    guardarRecurrentes();
+    generarRecurrentes();
+    return nuevo;
+}
+
+// Cambia la plantilla para las próximas ocurrencias; las ya registradas no se tocan.
+// La fecha recibida es la próxima ocurrencia y tiene que ser posterior a la última registrada.
+function editarRecurrente(id, datos, frecuencia) {
+    const r = obtenerRecurrentePorId(id);
+    if (!r) return null;
+    const { fecha, ...plantilla } = datosMovimiento(datos);
+    if (r.ultima && fecha <= r.ultima) {
+        throw new Error('La próxima fecha tiene que ser posterior a la última registrada.');
+    }
+    Object.assign(r, plantilla, { frecuencia });
+    if (fecha !== proximaFecha(r)) {
+        r.inicio = fecha;
+        r.ultima = null;
+    }
+    guardarRecurrentes();
+    generarRecurrentes();
+    return r;
+}
+
+// Los movimientos ya registrados se conservan, sin el vínculo.
+function eliminarRecurrente(id) {
+    const clave = String(id);
+    recurrentes = recurrentes.filter(r => r.id !== clave);
+    movimientos.forEach(m => { if (m.recurrenteId === clave) m.recurrenteId = null; });
+    guardarRecurrentes();
+    guardarMovimientos();
+}
+
+// Próxima ocurrencia de cada recurrente dentro de los próximos `dias`.
+function obtenerProximosVencimientos(dias = 30) {
+    const limite = aFechaISO(new Date(Date.now() + dias * 86400000));
+    return obtenerRecurrentes()
+        .map(r => ({ recurrente: r, fecha: proximaFecha(r) }))
+        .filter(v => v.fecha <= limite);
 }
 
 function buscarYFiltrar(texto, tipo, periodo) {
@@ -688,6 +818,16 @@ function etiquetaDia(fechaISO) {
     return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
+// "Mañana", "En 5 días" o "3 de noviembre" para fechas futuras.
+function etiquetaProxima(fechaISO) {
+    const hoy = desdeFechaISO(fechaHoy());
+    const dias = Math.round((desdeFechaISO(fechaISO) - hoy) / 86400000);
+    if (dias <= 0) return 'Hoy';
+    if (dias === 1) return 'Mañana';
+    if (dias < 7) return `En ${dias} días`;
+    return desdeFechaISO(fechaISO).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
+}
+
 function formatearFecha(fechaISO) {
     return desdeFechaISO(fechaISO).toLocaleDateString('es-AR', {
         day:   '2-digit',
@@ -701,14 +841,16 @@ export {
     inicializarDatos,
     obtenerGruposIconos, primerIcono,
     obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
-    contarMovimientosDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
+    contarMovimientosDeCuenta, contarRecurrentesDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
     obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria,
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
     buscarYFiltrar, agruparPorDia,
+    obtenerRecurrentes, obtenerRecurrentePorId, crearRecurrente, editarRecurrente, eliminarRecurrente,
+    obtenerProximosVencimientos, generarRecurrentes, proximaFecha,
     periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
     calcularResumen, calcularPromedioDiario, calcularVariacionGastos, calcularSerieMensual,
     obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
-    formatearMoneda, formatearFecha, etiquetaDia,
+    formatearMoneda, formatearFecha, etiquetaDia, etiquetaProxima,
     validarRespaldo, reemplazarDatos, exportarRespaldo, exportarCSV,
     cargarDatosDeEjemplo, reiniciarDatos, hayMovimientos
 };

@@ -14,11 +14,18 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap">
     <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.2/src/regular/style.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11.10.5/dist/sweetalert2.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.css">
     <link rel="stylesheet" href="./css/estilos.css">
-    <script defer src="./js/datos.js"></script>
-    <script defer src="./main.js"></script>
+    <script>
+        // Tema antes del primer pintado, para evitar el parpadeo claro → oscuro.
+        try {
+            var tema = localStorage.getItem('walletera_tema') ||
+                (matchMedia('(prefers-color-scheme: dark)').matches ? 'oscuro' : 'claro');
+            document.documentElement.setAttribute('data-tema', tema);
+        } catch (e) { /* sin almacenamiento: queda el tema por defecto */ }
+    </script>
+    <script type="module" src="./main.js"></script>
 </head>
 <body>
     <header class="cabecera">
@@ -63,7 +70,7 @@
                 <p class="seccion-descripcion">Resumen general de tu economía mensual.</p>
             </div>
             <div class="tarjeta-saldo">
-                <span class="tarjeta-saldo-label">Saldo disponible</span>
+                <span class="tarjeta-saldo-label">Saldo disponible · <span id="periodoSaldo"></span></span>
                 <p class="tarjeta-saldo-monto num" id="saldoDisponible">$0</p>
                 <div class="tarjeta-saldo-detalle">
                     <div>
@@ -71,7 +78,11 @@
                         <span class="detalle-valor num" id="fondoMensual">$0</span>
                     </div>
                     <div>
-                        <span class="detalle-label">Total gastado</span>
+                        <span class="detalle-label">Ingresos</span>
+                        <span class="detalle-valor num" id="ingresosMes">$0</span>
+                    </div>
+                    <div>
+                        <span class="detalle-label">Gastos</span>
                         <span class="detalle-valor num" id="totalGastado">$0</span>
                     </div>
                 </div>
@@ -81,7 +92,7 @@
             </div>
             <div class="grid-mini">
                 <div class="card">
-                    <span class="card-label">Movimientos</span>
+                    <span class="card-label">Movimientos del mes</span>
                     <p class="card-valor num" id="cantidadMovimientos">0</p>
                 </div>
                 <div class="card">
@@ -123,10 +134,10 @@
                 <i class="ph ph-magnifying-glass icono-buscar" aria-hidden="true"></i>
                 <input type="search" id="buscador" placeholder="Buscar por descripción..." aria-label="Buscar movimientos">
             </div>
-            <div class="filtros" role="tablist" aria-label="Filtrar por tipo">
-                <button class="filtro-btn activa" data-filtro="todos" type="button">Todos</button>
-                <button class="filtro-btn" data-filtro="ingreso" type="button">Ingresos</button>
-                <button class="filtro-btn" data-filtro="gasto" type="button">Gastos</button>
+            <div class="filtros" role="group" aria-label="Filtrar por tipo">
+                <button class="filtro-btn activa" data-filtro="todos" type="button" aria-pressed="true">Todos</button>
+                <button class="filtro-btn" data-filtro="ingreso" type="button" aria-pressed="false">Ingresos</button>
+                <button class="filtro-btn" data-filtro="gasto" type="button" aria-pressed="false">Gastos</button>
             </div>
             <ul class="lista-movimientos" id="listaMovimientos"></ul>
         </section>
@@ -182,11 +193,11 @@
                 <input type="hidden" id="categoriaIcono">
                 <label class="campo">
                     <span>Nombre</span>
-                    <input type="text" id="categoriaNombre" placeholder="Ej: Alimentación" required>
+                    <input type="text" id="categoriaNombre" placeholder="Ej: Alimentación" maxlength="40" required>
                 </label>
                 <label class="campo">
                     <span>Presupuesto</span>
-                    <input type="number" id="categoriaPresupuesto" placeholder="0" min="0" step="100" required>
+                    <input type="number" id="categoriaPresupuesto" placeholder="0" min="0" step="0.01" inputmode="decimal" required>
                 </label>
                 <div class="campo">
                     <span>Icono</span>
@@ -211,21 +222,21 @@
             <form class="formulario" id="formMovimiento">
                 <input type="hidden" id="movimientoId">
                 <div class="toggle-tipo">
-                    <button type="button" class="toggle-btn activa" data-tipo="gasto">Gasto</button>
-                    <button type="button" class="toggle-btn" data-tipo="ingreso">Ingreso</button>
+                    <button type="button" class="toggle-btn activa" data-tipo="gasto" aria-pressed="true">Gasto</button>
+                    <button type="button" class="toggle-btn" data-tipo="ingreso" aria-pressed="false">Ingreso</button>
                 </div>
                 <input type="hidden" id="movimientoTipo" value="gasto">
                 <label class="campo">
                     <span>Descripción</span>
-                    <input type="text" id="movimientoDescripcion" placeholder="Ej: Compra supermercado" required>
+                    <input type="text" id="movimientoDescripcion" placeholder="Ej: Compra supermercado" maxlength="80" required>
                 </label>
                 <label class="campo">
                     <span>Monto</span>
-                    <input type="number" id="movimientoMonto" placeholder="0" min="0" step="100" required>
+                    <input type="number" id="movimientoMonto" placeholder="0" min="0.01" step="0.01" inputmode="decimal" required>
                 </label>
-                <label class="campo">
+                <label class="campo" id="campoCategoria">
                     <span>Categoría</span>
-                    <select id="movimientoCategoria" required></select>
+                    <select id="movimientoCategoria"></select>
                 </label>
                 <label class="campo">
                     <span>Fecha</span>
@@ -238,8 +249,8 @@
             </form>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.10.5/dist/sweetalert2.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.js"></script>
 </body>
 </html>

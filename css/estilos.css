@@ -260,6 +260,7 @@ ul { list-style: none; }
     pointer-events: none;
 }
 .tarjeta-saldo-label { font-size: 0.85rem; opacity: 0.88; font-weight: 600; }
+#periodoSaldo::first-letter { text-transform: uppercase; }
 .tarjeta-saldo-monto {
     font-size: 2.4rem;
     font-weight: 800;
@@ -268,18 +269,40 @@ ul { list-style: none; }
 }
 .tarjeta-saldo-detalle {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
     margin-bottom: 18px;
 }
 .tarjeta-saldo-detalle > div {
     background: oklch(1 0 0 / 0.12);
     border: 1px solid oklch(1 0 0 / 0.14);
     border-radius: var(--radio-md);
-    padding: 11px 13px;
+    padding: 10px 12px;
+    min-width: 0;
 }
 .detalle-label { display: block; font-size: 0.72rem; opacity: 0.85; font-weight: 600; }
-.detalle-valor { font-size: 1.08rem; font-weight: 800; margin-top: 2px; }
+.detalle-valor {
+    display: block;
+    font-size: 1.08rem;
+    font-weight: 800;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* En pantallas angostas tres columnas no alcanzan para montos largos: pasan a filas */
+@media (max-width: 519px) {
+    .tarjeta-saldo-detalle { grid-template-columns: 1fr; gap: 6px; }
+    .tarjeta-saldo-detalle > div {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 9px 12px;
+    }
+    .detalle-label { font-size: 0.8rem; }
+    .detalle-valor { margin-top: 0; font-size: 1rem; }
+}
 
 /* ===== Cards genéricas ===== */
 .card {
@@ -574,6 +597,7 @@ ul { list-style: none; }
 /* ===== Formularios ===== */
 .formulario { display: flex; flex-direction: column; gap: 16px; }
 .campo { display: flex; flex-direction: column; gap: 7px; }
+.campo[hidden] { display: none; }
 .campo > span { font-size: 0.82rem; font-weight: 700; color: var(--tinta-media); }
 .campo input, .campo select {
     padding: 12px 14px;

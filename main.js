@@ -1,5 +1,17 @@
 // ===== Walletera | main.js =====
 // Capa de presentación: DOM, eventos, render y librerías externas.
+import {
+    inicializarDatos,
+    obtenerGruposIconos, primerIcono,
+    obtenerFondoMensual, setearFondoMensual,
+    obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria,
+    obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
+    buscarYFiltrar,
+    periodoActual, nombrePeriodo, fechaHoy, esFechaISO,
+    calcularResumen, calcularPromedioDiario, obtenerCategoriasConGasto, obtenerCategoriaMasGastada,
+    obtenerDatosGrafico,
+    formatearMoneda, formatearFecha
+} from './js/datos.js';
 
 // ===== Estado de UI =====
 let filtroActual = 'todos';
@@ -7,59 +19,62 @@ let busquedaActual = '';
 let graficoCategorias = null;
 let focoPrevio = null;
 
-// ===== Tema (se aplica de inmediato para evitar parpadeo) =====
 const CLAVE_TEMA = 'walletera_tema';
-function temaInicial() {
-    const guardado = localStorage.getItem(CLAVE_TEMA);
-    if (guardado) return guardado;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'oscuro' : 'claro';
-}
-document.documentElement.setAttribute('data-tema', temaInicial());
 
-// Paleta categórica cohesiva (derivada de la marca, no flat-UI 2014)
+// Paleta categórica cohesiva (derivada de la marca)
 const PALETA_GRAFICO = [
     'oklch(0.62 0.19 280)', 'oklch(0.66 0.16 250)', 'oklch(0.70 0.14 215)',
     'oklch(0.72 0.14 180)', 'oklch(0.72 0.15 150)', 'oklch(0.78 0.15 110)',
     'oklch(0.80 0.15 80)',  'oklch(0.72 0.16 45)',  'oklch(0.66 0.18 20)',
     'oklch(0.62 0.16 335)'
 ];
+const COLOR_SIN_CATEGORIA = 'oklch(0.70 0.01 280)';
+
+// Todo texto que viene del usuario o del almacenamiento pasa por acá antes de ir a innerHTML.
+const ENTIDADES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const esc = valor => String(valor).replace(/[&<>"']/g, c => ENTIDADES[c]);
+
+const $ = id => document.getElementById(id);
 
 // ===== Inicio =====
 iniciar();
+
 async function iniciar() {
     configurarTema();
     mostrarSkeletons();
     await inicializarDatos();
     configurarNavegacion();
     configurarModales();
+    configurarListas();
     configurarFormularioCategoria();
     configurarFormularioMovimiento();
     configurarBuscadorYFiltros();
     configurarBotones();
     renderizarTodo();
 }
+
 function renderizarTodo() {
     renderizarDashboard();
     renderizarCategorias();
     renderizarMovimientos();
     renderizarEstadisticas();
-    const seccionEstadisticas = document.getElementById('estadisticas');
-    if (seccionEstadisticas && seccionEstadisticas.classList.contains('activa')) renderizarGrafico();
+    if ($('estadisticas').classList.contains('activa')) renderizarGrafico();
 }
 
 // ===== Tema =====
+// El atributo data-tema ya lo fija el script inline del <head> para evitar parpadeo.
 function configurarTema() {
-    aplicarTema(document.documentElement.getAttribute('data-tema'));
-    document.getElementById('btnTema').addEventListener('click', () => {
+    aplicarTema(document.documentElement.getAttribute('data-tema') || 'claro');
+    $('btnTema').addEventListener('click', () => {
         const actual = document.documentElement.getAttribute('data-tema');
         aplicarTema(actual === 'oscuro' ? 'claro' : 'oscuro');
     });
 }
+
 function aplicarTema(tema) {
     document.documentElement.setAttribute('data-tema', tema);
-    localStorage.setItem(CLAVE_TEMA, tema);
-    const meta = document.getElementById('metaThemeColor');
-    if (meta) meta.setAttribute('content', tema === 'oscuro' ? '#221d31' : '#6C5CE7');
+    try { localStorage.setItem(CLAVE_TEMA, tema); } catch { /* sin almacenamiento */ }
+    $('metaThemeColor')?.setAttribute('content', tema === 'oscuro' ? '#221d31' : '#6C5CE7');
     if (graficoCategorias) renderizarGrafico();
 }
 
@@ -69,9 +84,9 @@ function configurarNavegacion() {
         btn.addEventListener('click', () => irASeccion(btn.dataset.seccion));
     });
 }
+
 function irASeccion(idSeccion) {
-    document.querySelectorAll('.seccion').forEach(s => s.classList.remove('activa'));
-    document.getElementById(idSeccion).classList.add('activa');
+    document.querySelectorAll('.seccion').forEach(s => s.classList.toggle('activa', s.id === idSeccion));
     document.querySelectorAll('.nav-btn').forEach(b => {
         const activa = b.dataset.seccion === idSeccion;
         b.classList.toggle('activa', activa);
@@ -83,18 +98,12 @@ function irASeccion(idSeccion) {
 
 // ===== Skeletons de carga =====
 function mostrarSkeletons() {
-    const filas = n => Array.from({ length: n }, () => '<li class="skeleton skel-fila"></li>').join('');
-    ['ultimosMovimientos', 'listaMovimientos'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = filas(4);
-    });
-    ['resumenCategorias', 'listaCategorias'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = filas(3);
-    });
+    const filas = n => '<li class="skeleton skel-fila"></li>'.repeat(n);
+    ['ultimosMovimientos', 'listaMovimientos'].forEach(id => { $(id).innerHTML = filas(4); });
+    ['resumenCategorias', 'listaCategorias'].forEach(id => { $(id).innerHTML = filas(3); });
 }
 
-// ===== Estado vacío compuesto =====
+// ===== Estado vacío =====
 function htmlVacio(icono, titulo, sub) {
     return `<li class="vacio">
         <i class="ph ${icono}" aria-hidden="true"></i>
@@ -105,43 +114,42 @@ function htmlVacio(icono, titulo, sub) {
 
 // ===== Dashboard =====
 function renderizarDashboard() {
-    document.getElementById('saldoDisponible').textContent     = formatearMoneda(calcularSaldoDisponible());
-    document.getElementById('fondoMensual').textContent        = formatearMoneda(obtenerFondoMensual());
-    document.getElementById('totalGastado').textContent        = formatearMoneda(calcularTotalGastado());
-    document.getElementById('cantidadMovimientos').textContent = calcularCantidadMovimientos();
-    document.getElementById('porcentajeUtilizado').textContent = `${calcularPorcentajeUtilizado().toFixed(1)}%`;
+    const resumen = calcularResumen();
+    $('periodoSaldo').textContent         = nombrePeriodo(periodoActual());
+    $('saldoDisponible').textContent      = formatearMoneda(resumen.saldo);
+    $('fondoMensual').textContent         = formatearMoneda(resumen.fondo);
+    $('ingresosMes').textContent          = formatearMoneda(resumen.ingresos);
+    $('totalGastado').textContent         = formatearMoneda(resumen.gastos);
+    $('cantidadMovimientos').textContent  = resumen.cantidad;
+    $('porcentajeUtilizado').textContent  = `${resumen.porcentajeUtilizado.toFixed(1)}%`;
     renderizarUltimosMovimientos();
     renderizarResumenCategorias();
 }
+
 function renderizarUltimosMovimientos() {
-    const cont = document.getElementById('ultimosMovimientos');
     const ultimos = obtenerMovimientos().slice(0, 5);
-    if (ultimos.length === 0) {
-        cont.innerHTML = htmlVacio('ph-tray', 'Todavía no hay movimientos', 'Tocá el botón + para registrar el primero.');
-        return;
-    }
-    cont.innerHTML = ultimos.map((m, i) => crearHTMLMovimiento(m, false, i)).join('');
+    $('ultimosMovimientos').innerHTML = ultimos.length
+        ? ultimos.map((m, i) => crearHTMLMovimiento(m, false, i)).join('')
+        : htmlVacio('ph-tray', 'Todavía no hay movimientos', 'Tocá el botón + para registrar el primero.');
 }
+
 function renderizarResumenCategorias() {
-    const cont = document.getElementById('resumenCategorias');
-    const cats = obtenerCategorias();
-    if (cats.length === 0) {
-        cont.innerHTML = htmlVacio('ph-squares-four', 'No hay categorías');
-        return;
-    }
-    cont.innerHTML = cats.slice(0, 5).map(c => `
-        <li class="categoria-mini">
-            <span class="categoria-mini-icono">${c.icono}</span>
-            <span class="categoria-mini-nombre">${c.nombre}</span>
-            <span class="categoria-mini-monto">${formatearMoneda(c.gastado)} / ${formatearMoneda(c.presupuesto)}</span>
-        </li>
-    `).join('');
+    const cats = obtenerCategoriasConGasto();
+    $('resumenCategorias').innerHTML = cats.length
+        ? cats.slice(0, 5).map(c => `
+            <li class="categoria-mini">
+                <span class="categoria-mini-icono">${esc(c.icono)}</span>
+                <span class="categoria-mini-nombre">${esc(c.nombre)}</span>
+                <span class="categoria-mini-monto">${formatearMoneda(c.gastado)} / ${formatearMoneda(c.presupuesto)}</span>
+            </li>
+        `).join('')
+        : htmlVacio('ph-squares-four', 'No hay categorías');
 }
 
 // ===== Categorías =====
 function renderizarCategorias() {
-    const cont = document.getElementById('listaCategorias');
-    const cats = obtenerCategorias();
+    const cont = $('listaCategorias');
+    const cats = obtenerCategoriasConGasto();
     if (cats.length === 0) {
         cont.innerHTML = htmlVacio('ph-squares-four', 'Todavía no hay categorías', 'Creá la primera con el botón de arriba.');
         return;
@@ -150,14 +158,16 @@ function renderizarCategorias() {
         const disponible = c.presupuesto - c.gastado;
         const porcentaje = c.presupuesto > 0 ? (c.gastado / c.presupuesto) * 100 : 0;
         const salud = porcentaje >= 100 ? 'alerta' : (porcentaje >= 80 ? 'cerca' : '');
+        const nombre = esc(c.nombre);
+        const id = esc(c.id);
         return `
             <li class="categoria" style="--i:${i}">
                 <div class="categoria-encabezado">
-                    <span class="categoria-icono">${c.icono}</span>
-                    <span class="categoria-nombre">${c.nombre}</span>
+                    <span class="categoria-icono">${esc(c.icono)}</span>
+                    <span class="categoria-nombre">${nombre}</span>
                     <div class="categoria-acciones">
-                        <button class="movimiento-accion" data-editar-categoria="${c.id}" aria-label="Editar ${c.nombre}"><i class="ph ph-pencil-simple"></i></button>
-                        <button class="movimiento-accion peligro" data-eliminar-categoria="${c.id}" aria-label="Eliminar ${c.nombre}"><i class="ph ph-trash"></i></button>
+                        <button class="movimiento-accion" type="button" data-editar-categoria="${id}" aria-label="Editar ${nombre}"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
+                        <button class="movimiento-accion peligro" type="button" data-eliminar-categoria="${id}" aria-label="Eliminar ${nombre}"><i class="ph ph-trash" aria-hidden="true"></i></button>
                     </div>
                 </div>
                 <div class="categoria-datos">
@@ -185,69 +195,86 @@ function renderizarCategorias() {
     requestAnimationFrame(() => {
         cont.querySelectorAll('.barra-progreso-relleno').forEach(b => { b.style.width = `${b.dataset.w}%`; });
     });
-    cont.querySelectorAll('[data-editar-categoria]').forEach(btn => {
-        btn.addEventListener('click', () => abrirModalCategoria(btn.dataset.editarCategoria));
-    });
-    cont.querySelectorAll('[data-eliminar-categoria]').forEach(btn => {
-        btn.addEventListener('click', () => confirmarEliminarCategoria(btn.dataset.eliminarCategoria));
-    });
 }
 
 // ===== Movimientos =====
 function renderizarMovimientos() {
-    const cont = document.getElementById('listaMovimientos');
     const lista = buscarYFiltrar(busquedaActual, filtroActual);
     if (lista.length === 0) {
-        const vacio = busquedaActual || filtroActual !== 'todos'
+        $('listaMovimientos').innerHTML = busquedaActual || filtroActual !== 'todos'
             ? htmlVacio('ph-magnifying-glass', 'Sin resultados', 'Probá con otro texto o filtro.')
             : htmlVacio('ph-tray', 'Todavía no hay movimientos', 'Tocá el botón + para registrar el primero.');
-        cont.innerHTML = vacio;
         return;
     }
-    cont.innerHTML = lista.map((m, i) => crearHTMLMovimiento(m, true, i)).join('');
-    cont.querySelectorAll('[data-editar-movimiento]').forEach(btn => {
-        btn.addEventListener('click', () => abrirModalMovimiento(btn.dataset.editarMovimiento));
-    });
-    cont.querySelectorAll('[data-eliminar-movimiento]').forEach(btn => {
-        btn.addEventListener('click', () => confirmarEliminarMovimiento(btn.dataset.eliminarMovimiento));
-    });
+    $('listaMovimientos').innerHTML = lista.map((m, i) => crearHTMLMovimiento(m, true, i)).join('');
 }
+
 function crearHTMLMovimiento(m, conAcciones, indice = 0) {
-    const cat = obtenerCategoriaPorId(m.categoriaId);
-    const iconoHTML = cat
-        ? `<span class="movimiento-icono">${cat.icono}</span>`
-        : `<span class="movimiento-icono"><i class="ph ph-receipt"></i></span>`;
-    const nombreCat = cat ? cat.nombre : 'Sin categoría';
-    const signo = m.tipo === 'ingreso' ? '+' : '-';
+    const cat = m.categoriaId ? obtenerCategoriaPorId(m.categoriaId) : null;
+    const esIngreso = m.tipo === 'ingreso';
+    let icono = '<i class="ph ph-receipt" aria-hidden="true"></i>';
+    let etiqueta = 'Sin categoría';
+    if (esIngreso) {
+        icono = '<i class="ph ph-arrow-down-left" aria-hidden="true"></i>';
+        etiqueta = 'Ingreso';
+    } else if (cat) {
+        icono = esc(cat.icono);
+        etiqueta = esc(cat.nombre);
+    }
+    const descripcion = esc(m.descripcion);
+    const id = esc(m.id);
     const acciones = conAcciones ? `
         <div class="movimiento-acciones">
-            <button class="movimiento-accion" data-editar-movimiento="${m.id}" aria-label="Editar"><i class="ph ph-pencil-simple"></i></button>
-            <button class="movimiento-accion peligro" data-eliminar-movimiento="${m.id}" aria-label="Eliminar"><i class="ph ph-trash"></i></button>
+            <button class="movimiento-accion" type="button" data-editar-movimiento="${id}" aria-label="Editar ${descripcion}"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
+            <button class="movimiento-accion peligro" type="button" data-eliminar-movimiento="${id}" aria-label="Eliminar ${descripcion}"><i class="ph ph-trash" aria-hidden="true"></i></button>
         </div>
     ` : '';
     return `
         <li class="movimiento movimiento-${m.tipo}" style="--i:${indice}">
-            ${iconoHTML}
+            <span class="movimiento-icono">${icono}</span>
             <div class="movimiento-info">
-                <div class="movimiento-descripcion">${m.descripcion}</div>
-                <div class="movimiento-meta">${nombreCat} · ${formatearFecha(m.fecha)}</div>
+                <div class="movimiento-descripcion">${descripcion}</div>
+                <div class="movimiento-meta">${etiqueta} · ${formatearFecha(m.fecha)}</div>
             </div>
-            <div class="movimiento-monto">${signo} ${formatearMoneda(m.monto)}</div>
+            <div class="movimiento-monto">${esIngreso ? '+' : '-'} ${formatearMoneda(m.monto)}</div>
             ${acciones}
         </li>
     `;
 }
 
+// Un solo listener por lista (delegación), en lugar de re-enlazar en cada render.
+function configurarListas() {
+    $('listaCategorias').addEventListener('click', e => {
+        const editar = e.target.closest('[data-editar-categoria]');
+        const eliminar = e.target.closest('[data-eliminar-categoria]');
+        if (editar) abrirModalCategoria(editar.dataset.editarCategoria);
+        else if (eliminar) confirmarEliminarCategoria(eliminar.dataset.eliminarCategoria);
+    });
+    $('listaMovimientos').addEventListener('click', e => {
+        const editar = e.target.closest('[data-editar-movimiento]');
+        const eliminar = e.target.closest('[data-eliminar-movimiento]');
+        if (editar) abrirModalMovimiento(editar.dataset.editarMovimiento);
+        else if (eliminar) confirmarEliminarMovimiento(eliminar.dataset.eliminarMovimiento);
+    });
+    $('selectorEmojis').addEventListener('click', e => {
+        const btn = e.target.closest('.emoji-btn');
+        if (btn) seleccionarEmoji(btn.dataset.emoji);
+    });
+}
+
 // ===== Buscador y filtros =====
 function configurarBuscadorYFiltros() {
-    document.getElementById('buscador').addEventListener('input', e => {
+    $('buscador').addEventListener('input', e => {
         busquedaActual = e.target.value;
         renderizarMovimientos();
     });
     document.querySelectorAll('.filtro-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.filtro-btn').forEach(b => b.classList.remove('activa'));
-            btn.classList.add('activa');
+            document.querySelectorAll('.filtro-btn').forEach(b => {
+                const activa = b === btn;
+                b.classList.toggle('activa', activa);
+                b.setAttribute('aria-pressed', String(activa));
+            });
             filtroActual = btn.dataset.filtro;
             renderizarMovimientos();
         });
@@ -256,49 +283,50 @@ function configurarBuscadorYFiltros() {
 
 // ===== Estadísticas =====
 function renderizarEstadisticas() {
+    const resumen = calcularResumen();
     const top = obtenerCategoriaMasGastada();
-    document.getElementById('statCategoriaTop').textContent       = top && top.gastado > 0 ? `${top.icono} ${top.nombre}` : 'Sin datos';
-    document.getElementById('statTotalGastado').textContent       = formatearMoneda(calcularTotalGastado());
-    document.getElementById('statPromedioDiario').textContent     = formatearMoneda(calcularPromedioDiario());
-    document.getElementById('statCantidadMovimientos').textContent= calcularCantidadMovimientos();
-    document.getElementById('statPorcentajeConsumido').textContent= `${calcularPorcentajeUtilizado().toFixed(1)}%`;
+    $('statCategoriaTop').textContent        = top ? `${top.icono} ${top.nombre}` : 'Sin datos';
+    $('statTotalGastado').textContent        = formatearMoneda(resumen.gastos);
+    $('statPromedioDiario').textContent      = formatearMoneda(calcularPromedioDiario());
+    $('statCantidadMovimientos').textContent = resumen.cantidad;
+    $('statPorcentajeConsumido').textContent = `${resumen.porcentajeUtilizado.toFixed(1)}%`;
 }
+
 function renderizarGrafico() {
-    const ctx = document.getElementById('graficoCategorias');
+    const ctx = $('graficoCategorias');
     if (!ctx || typeof Chart === 'undefined') return;
     const contenedor = ctx.parentElement;
-    const cats = obtenerCategorias().filter(c => c.gastado > 0);
+    const datos = obtenerDatosGrafico();
     let aviso = contenedor.querySelector('.grafico-vacio');
 
-    if (cats.length === 0) {
-        if (graficoCategorias) { graficoCategorias.destroy(); graficoCategorias = null; }
+    if (datos.length === 0) {
+        graficoCategorias?.destroy();
+        graficoCategorias = null;
         ctx.style.display = 'none';
         if (!aviso) {
             aviso = document.createElement('div');
             aviso.className = 'vacio grafico-vacio';
-            aviso.innerHTML = '<i class="ph ph-chart-pie-slice" aria-hidden="true"></i><strong>Sin gastos para mostrar</strong><span>Registrá un gasto para ver el desglose.</span>';
+            aviso.innerHTML = '<i class="ph ph-chart-pie-slice" aria-hidden="true"></i><strong>Sin gastos este mes</strong><span>Registrá un gasto para ver el desglose.</span>';
             contenedor.appendChild(aviso);
         }
         return;
     }
-    if (aviso) aviso.remove();
+    aviso?.remove();
     ctx.style.display = '';
 
     const estilos = getComputedStyle(document.documentElement);
     const colorTexto = estilos.getPropertyValue('--tinta-suave').trim() || '#888';
     const colorBorde = estilos.getPropertyValue('--superficie').trim() || '#fff';
+    const colores = datos.map((d, i) => d.sinCategoria ? COLOR_SIN_CATEGORIA : PALETA_GRAFICO[i % PALETA_GRAFICO.length]);
 
-    const etiquetas = cats.map(c => `${c.icono} ${c.nombre}`);
-    const valores   = cats.map(c => c.gastado);
-
-    if (graficoCategorias) graficoCategorias.destroy();
+    graficoCategorias?.destroy();
     graficoCategorias = new Chart(ctx, {
         type: 'doughnut',
         data: {
-            labels: etiquetas,
+            labels: datos.map(d => d.etiqueta),
             datasets: [{
-                data: valores,
-                backgroundColor: PALETA_GRAFICO,
+                data: datos.map(d => d.valor),
+                backgroundColor: colores,
                 borderColor: colorBorde,
                 borderWidth: 3,
                 hoverOffset: 8
@@ -333,15 +361,16 @@ function renderizarGrafico() {
         }
     });
 }
+
 function prefiereMenosMovimiento() {
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 // ===== Botones globales =====
 function configurarBotones() {
-    document.getElementById('btnNuevaCategoria').addEventListener('click', () => abrirModalCategoria());
-    document.getElementById('btnNuevoMovimiento').addEventListener('click', () => abrirModalMovimiento());
-    document.getElementById('btnEditarFondo').addEventListener('click', editarFondoMensual);
+    $('btnNuevaCategoria').addEventListener('click', () => abrirModalCategoria());
+    $('btnNuevoMovimiento').addEventListener('click', () => abrirModalMovimiento());
+    $('btnEditarFondo').addEventListener('click', editarFondoMensual);
 }
 
 // ===== Modales (apertura/cierre + foco accesible) =====
@@ -350,8 +379,9 @@ function configurarModales() {
         el.addEventListener('click', () => cerrarModal(el.dataset.cerrar));
     });
 }
+
 function abrirModal(id) {
-    const modal = document.getElementById(id);
+    const modal = $(id);
     focoPrevio = document.activeElement;
     modal.classList.add('activo');
     modal.setAttribute('aria-hidden', 'false');
@@ -360,14 +390,16 @@ function abrirModal(id) {
     const primerCampo = modal.querySelector('input:not([type=hidden]):not([type=date]), select, textarea, button:not(.modal-cerrar)');
     if (primerCampo) setTimeout(() => primerCampo.focus({ preventScroll: true }), 60);
 }
+
 function cerrarModal(id) {
-    const modal = document.getElementById(id);
+    const modal = $(id);
     modal.classList.remove('activo');
     modal.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
     modal.removeEventListener('keydown', manejarTeclasModal);
-    if (focoPrevio && typeof focoPrevio.focus === 'function') focoPrevio.focus({ preventScroll: true });
+    focoPrevio?.focus?.({ preventScroll: true });
 }
+
 function manejarTeclasModal(e) {
     const modal = e.currentTarget;
     if (e.key === 'Escape') { cerrarModal(modal.id); return; }
@@ -384,55 +416,57 @@ function manejarTeclasModal(e) {
 
 // ===== Modal Categoría =====
 function abrirModalCategoria(id) {
-    const form = document.getElementById('formCategoria');
-    form.reset();
+    $('formCategoria').reset();
     renderizarSelectorEmojis();
     if (id) {
         const cat = obtenerCategoriaPorId(id);
         if (!cat) return;
-        document.getElementById('tituloModalCategoria').textContent = 'Editar categoría';
-        document.getElementById('categoriaId').value          = cat.id;
-        document.getElementById('categoriaNombre').value      = cat.nombre;
-        document.getElementById('categoriaPresupuesto').value = cat.presupuesto;
+        $('tituloModalCategoria').textContent = 'Editar categoría';
+        $('categoriaId').value          = cat.id;
+        $('categoriaNombre').value      = cat.nombre;
+        $('categoriaPresupuesto').value = cat.presupuesto;
         seleccionarEmoji(cat.icono);
     } else {
-        document.getElementById('tituloModalCategoria').textContent = 'Nueva categoría';
-        document.getElementById('categoriaId').value = '';
+        $('tituloModalCategoria').textContent = 'Nueva categoría';
+        $('categoriaId').value = '';
         seleccionarEmoji(primerIcono());
     }
     abrirModal('modalCategoria');
 }
+
 function renderizarSelectorEmojis() {
-    const cont = document.getElementById('selectorEmojis');
-    cont.innerHTML = obtenerGruposIconos().map(g => `
+    $('selectorEmojis').innerHTML = obtenerGruposIconos().map(g => `
         <div class="emoji-grupo">
-            <p class="emoji-grupo-titulo">${g.grupo}</p>
+            <p class="emoji-grupo-titulo">${esc(g.grupo)}</p>
             <div class="emoji-grupo-grid">
                 ${g.iconos.map(e => `
-                    <button type="button" class="emoji-btn" data-emoji="${e}" role="radio" aria-checked="false" aria-label="Ícono ${e}">${e}</button>
+                    <button type="button" class="emoji-btn" data-emoji="${esc(e)}" role="radio" aria-checked="false" aria-label="Ícono ${esc(e)}">${esc(e)}</button>
                 `).join('')}
             </div>
         </div>
     `).join('');
-    cont.querySelectorAll('.emoji-btn').forEach(btn => {
-        btn.addEventListener('click', () => seleccionarEmoji(btn.dataset.emoji));
-    });
 }
+
 function seleccionarEmoji(emoji) {
-    document.getElementById('categoriaIcono').value = emoji;
+    $('categoriaIcono').value = emoji;
     document.querySelectorAll('#selectorEmojis .emoji-btn').forEach(btn => {
         const activa = btn.dataset.emoji === emoji;
         btn.classList.toggle('activa', activa);
         btn.setAttribute('aria-checked', activa ? 'true' : 'false');
     });
 }
+
 function configurarFormularioCategoria() {
-    document.getElementById('formCategoria').addEventListener('submit', e => {
+    $('formCategoria').addEventListener('submit', e => {
         e.preventDefault();
-        const id           = document.getElementById('categoriaId').value;
-        const nombre       = document.getElementById('categoriaNombre').value;
-        const icono        = document.getElementById('categoriaIcono').value;
-        const presupuesto  = document.getElementById('categoriaPresupuesto').value;
+        const id          = $('categoriaId').value;
+        const nombre      = $('categoriaNombre').value;
+        const icono       = $('categoriaIcono').value;
+        const presupuesto = $('categoriaPresupuesto').value;
+        if (!nombre.trim()) {
+            mostrarToast('Escribí un nombre para la categoría', 'alerta');
+            return;
+        }
         if (!icono) {
             mostrarToast('Elegí un ícono para la categoría', 'alerta');
             return;
@@ -448,10 +482,11 @@ function configurarFormularioCategoria() {
         renderizarTodo();
     });
 }
+
 function confirmarEliminarCategoria(id) {
     Swal.fire(opcionesSwal({
         title: '¿Eliminar categoría?',
-        text: 'Se eliminarán también los movimientos asociados a esta categoría.',
+        text: 'Sus movimientos se conservan y quedan como "Sin categoría".',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonText: 'Sí, eliminar',
@@ -469,72 +504,82 @@ function confirmarEliminarCategoria(id) {
 
 // ===== Modal Movimiento =====
 function abrirModalMovimiento(id) {
-    const form = document.getElementById('formMovimiento');
-    form.reset();
+    $('formMovimiento').reset();
     cargarSelectCategorias();
-    if (obtenerCategorias().length === 0) {
-        Swal.fire(opcionesSwal({
-            title: 'Sin categorías',
-            text: 'Primero creá al menos una categoría para poder registrar movimientos.',
-            icon: 'info',
-            confirmButtonColor: '#6C5CE7'
-        }));
-        return;
-    }
     if (id) {
         const m = obtenerMovimientoPorId(id);
         if (!m) return;
-        document.getElementById('tituloModalMovimiento').textContent = 'Editar movimiento';
-        document.getElementById('movimientoId').value          = m.id;
-        document.getElementById('movimientoDescripcion').value = m.descripcion;
-        document.getElementById('movimientoMonto').value       = m.monto;
-        document.getElementById('movimientoCategoria').value   = m.categoriaId;
-        document.getElementById('movimientoFecha').value       = aFechaInput(m.fecha);
+        $('tituloModalMovimiento').textContent = 'Editar movimiento';
+        $('movimientoId').value          = m.id;
+        $('movimientoDescripcion').value = m.descripcion;
+        $('movimientoMonto').value       = m.monto;
+        $('movimientoFecha').value       = m.fecha;
+        if (m.categoriaId && obtenerCategoriaPorId(m.categoriaId)) $('movimientoCategoria').value = m.categoriaId;
         seleccionarTipo(m.tipo);
     } else {
-        document.getElementById('tituloModalMovimiento').textContent = 'Nuevo movimiento';
-        document.getElementById('movimientoId').value    = '';
-        document.getElementById('movimientoFecha').value = aFechaInput(Date.now());
+        $('tituloModalMovimiento').textContent = 'Nuevo movimiento';
+        $('movimientoId').value    = '';
+        $('movimientoFecha').value = fechaHoy();
         seleccionarTipo('gasto');
     }
     abrirModal('modalMovimiento');
 }
+
 function cargarSelectCategorias() {
-    const sel = document.getElementById('movimientoCategoria');
-    sel.innerHTML = obtenerCategorias()
-        .map(c => `<option value="${c.id}">${c.icono} ${c.nombre}</option>`)
+    const opciones = obtenerCategorias()
+        .map(c => `<option value="${esc(c.id)}">${esc(c.icono)} ${esc(c.nombre)}</option>`)
         .join('');
+    $('movimientoCategoria').innerHTML = '<option value="">Sin categoría</option>' + opciones;
 }
+
+// Los ingresos no llevan categoría: las categorías son rubros de gasto con presupuesto.
 function seleccionarTipo(tipo) {
-    document.getElementById('movimientoTipo').value = tipo;
+    $('movimientoTipo').value = tipo;
     document.querySelectorAll('.toggle-btn').forEach(btn => {
-        btn.classList.toggle('activa', btn.dataset.tipo === tipo);
+        const activa = btn.dataset.tipo === tipo;
+        btn.classList.toggle('activa', activa);
+        btn.setAttribute('aria-pressed', String(activa));
     });
+    $('campoCategoria').hidden = tipo !== 'gasto';
 }
+
 function configurarFormularioMovimiento() {
     document.querySelectorAll('.toggle-btn').forEach(btn => {
         btn.addEventListener('click', () => seleccionarTipo(btn.dataset.tipo));
     });
-    document.getElementById('formMovimiento').addEventListener('submit', e => {
+    $('formMovimiento').addEventListener('submit', e => {
         e.preventDefault();
-        const id          = document.getElementById('movimientoId').value;
-        const descripcion = document.getElementById('movimientoDescripcion').value;
-        const monto       = document.getElementById('movimientoMonto').value;
-        const categoriaId = document.getElementById('movimientoCategoria').value;
-        const tipo        = document.getElementById('movimientoTipo').value;
-        const fechaStr    = document.getElementById('movimientoFecha').value;
-        const fecha       = new Date(fechaStr).getTime();
+        const id          = $('movimientoId').value;
+        const descripcion = $('movimientoDescripcion').value;
+        const monto       = Number($('movimientoMonto').value);
+        const categoriaId = $('movimientoCategoria').value;
+        const tipo        = $('movimientoTipo').value;
+        const fecha       = $('movimientoFecha').value;
+        if (!descripcion.trim()) {
+            mostrarToast('Escribí una descripción', 'alerta');
+            return;
+        }
+        if (!(monto > 0)) {
+            mostrarToast('El monto tiene que ser mayor a cero', 'alerta');
+            return;
+        }
+        if (!esFechaISO(fecha)) {
+            mostrarToast('Elegí una fecha válida', 'alerta');
+            return;
+        }
+        const datos = { descripcion, monto, categoriaId, tipo, fecha };
         if (id) {
-            editarMovimiento(id, { descripcion, monto, categoriaId, tipo, fecha });
+            editarMovimiento(id, datos);
             mostrarToast('Movimiento actualizado');
         } else {
-            crearMovimiento({ descripcion, monto, categoriaId, tipo, fecha });
+            crearMovimiento(datos);
             mostrarToast('Movimiento creado');
         }
         cerrarModal('modalMovimiento');
         renderizarTodo();
     });
 }
+
 function confirmarEliminarMovimiento(id) {
     Swal.fire(opcionesSwal({
         title: '¿Eliminar movimiento?',
@@ -559,15 +604,16 @@ function editarFondoMensual() {
     Swal.fire(opcionesSwal({
         title: 'Definir fondo mensual',
         input: 'number',
-        inputLabel: 'Monto disponible para este mes',
+        inputLabel: 'Monto disponible para cada mes',
         inputValue: obtenerFondoMensual(),
-        inputAttributes: { min: 0, step: 100 },
+        inputAttributes: { min: 0, step: '0.01', inputmode: 'decimal' },
         showCancelButton: true,
         confirmButtonText: 'Guardar',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: '#6C5CE7',
         inputValidator: valor => {
-            if (!valor || Number(valor) < 0) return 'Ingresá un monto válido';
+            const monto = Number(valor);
+            if (valor === '' || !Number.isFinite(monto) || monto < 0) return 'Ingresá un monto válido';
         }
     })).then(resultado => {
         if (resultado.isConfirmed) {
@@ -613,13 +659,4 @@ function mostrarToast(mensaje, tipo) {
             boxShadow: 'none'
         }
     }).showToast();
-}
-
-// ===== Helpers =====
-function aFechaInput(timestamp) {
-    const d = new Date(timestamp);
-    const yyyy = d.getFullYear();
-    const mm   = String(d.getMonth() + 1).padStart(2, '0');
-    const dd   = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
 }

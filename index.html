@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Walletera, tu dinero bajo control. Aplicación de control financiero familiar con fondo mensual, categorías y estadísticas.">
+    <meta name="description" content="Walletera, tu dinero bajo control. Billetera personal con cuentas, transferencias, presupuestos por categoría y estadísticas mensuales.">
     <meta name="theme-color" content="#6C5CE7" id="metaThemeColor">
     <meta property="og:title" content="Walletera">
     <meta property="og:description" content="Tu dinero bajo control">
@@ -45,60 +45,93 @@
     </header>
     <nav class="navegacion" aria-label="Navegación principal">
         <div class="contenedor nav-contenido">
-            <button class="nav-btn activa" data-seccion="inicio" aria-label="Ir a Inicio" aria-current="page">
+            <button class="nav-btn activa" data-seccion="inicio" type="button" aria-current="page">
                 <span class="nav-icono"><i class="ph ph-house" aria-hidden="true"></i></span>
                 <span class="nav-texto">Inicio</span>
             </button>
-            <button class="nav-btn" data-seccion="categorias" aria-label="Ir a Categorías">
-                <span class="nav-icono"><i class="ph ph-squares-four" aria-hidden="true"></i></span>
-                <span class="nav-texto">Categorías</span>
+            <button class="nav-btn" data-seccion="cuentas" type="button">
+                <span class="nav-icono"><i class="ph ph-wallet" aria-hidden="true"></i></span>
+                <span class="nav-texto">Cuentas</span>
             </button>
-            <button class="nav-btn" data-seccion="movimientos" aria-label="Ir a Movimientos">
+            <button class="nav-btn" data-seccion="movimientos" type="button">
                 <span class="nav-icono"><i class="ph ph-arrows-left-right" aria-hidden="true"></i></span>
                 <span class="nav-texto">Movimientos</span>
             </button>
-            <button class="nav-btn" data-seccion="estadisticas" aria-label="Ir a Estadísticas">
+            <button class="nav-btn" data-seccion="categorias" type="button">
+                <span class="nav-icono"><i class="ph ph-squares-four" aria-hidden="true"></i></span>
+                <span class="nav-texto">Categorías</span>
+            </button>
+            <button class="nav-btn" data-seccion="estadisticas" type="button">
                 <span class="nav-icono"><i class="ph ph-chart-pie-slice" aria-hidden="true"></i></span>
                 <span class="nav-texto">Estadísticas</span>
             </button>
         </div>
     </nav>
     <main class="contenedor principal">
+        <div class="selector-periodo" id="selectorPeriodo" role="group" aria-label="Período">
+            <button class="periodo-btn" id="btnPeriodoAnterior" type="button" aria-label="Mes anterior">
+                <i class="ph ph-caret-left" aria-hidden="true"></i>
+            </button>
+            <span class="periodo-nombre" id="periodoNombre" aria-live="polite"></span>
+            <button class="periodo-btn" id="btnPeriodoSiguiente" type="button" aria-label="Mes siguiente">
+                <i class="ph ph-caret-right" aria-hidden="true"></i>
+            </button>
+        </div>
         <section class="seccion activa" id="inicio">
             <div class="seccion-encabezado">
                 <h2>Inicio</h2>
-                <p class="seccion-descripcion">Resumen general de tu economía mensual.</p>
+                <p class="seccion-descripcion">Tu saldo y cómo viene el mes.</p>
             </div>
             <div class="tarjeta-saldo">
-                <span class="tarjeta-saldo-label">Saldo disponible · <span id="periodoSaldo"></span></span>
-                <p class="tarjeta-saldo-monto num" id="saldoDisponible">$0</p>
+                <span class="tarjeta-saldo-label">Saldo total</span>
+                <p class="tarjeta-saldo-monto num" id="saldoTotal">$0</p>
+                <span class="tarjeta-saldo-sub" id="saldoCuentas"></span>
                 <div class="tarjeta-saldo-detalle">
-                    <div>
-                        <span class="detalle-label">Fondo mensual</span>
-                        <span class="detalle-valor num" id="fondoMensual">$0</span>
-                    </div>
                     <div>
                         <span class="detalle-label">Ingresos</span>
                         <span class="detalle-valor num" id="ingresosMes">$0</span>
                     </div>
                     <div>
                         <span class="detalle-label">Gastos</span>
-                        <span class="detalle-valor num" id="totalGastado">$0</span>
+                        <span class="detalle-valor num" id="gastosMes">$0</span>
+                    </div>
+                    <div>
+                        <span class="detalle-label">Resultado</span>
+                        <span class="detalle-valor num" id="resultadoMes">$0</span>
                     </div>
                 </div>
-                <button class="btn btn-claro" id="btnEditarFondo" type="button">
-                    <i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar fondo mensual
-                </button>
+                <div class="acciones-rapidas">
+                    <button class="btn btn-claro" type="button" data-nuevo-movimiento="gasto">
+                        <i class="ph ph-arrow-up-right" aria-hidden="true"></i> Gasto
+                    </button>
+                    <button class="btn btn-claro" type="button" data-nuevo-movimiento="ingreso">
+                        <i class="ph ph-arrow-down-left" aria-hidden="true"></i> Ingreso
+                    </button>
+                    <button class="btn btn-claro" type="button" data-nuevo-movimiento="transferencia">
+                        <i class="ph ph-arrows-left-right" aria-hidden="true"></i> Transferir
+                    </button>
+                </div>
             </div>
             <div class="grid-mini">
                 <div class="card">
-                    <span class="card-label">Movimientos del mes</span>
+                    <span class="card-label">Movimientos</span>
                     <p class="card-valor num" id="cantidadMovimientos">0</p>
                 </div>
                 <div class="card">
-                    <span class="card-label">% Utilizado</span>
-                    <p class="card-valor num" id="porcentajeUtilizado">0%</p>
+                    <span class="card-label">Presupuesto usado</span>
+                    <p class="card-valor num" id="porcentajePresupuesto">0%</p>
                 </div>
+                <div class="card">
+                    <span class="card-label">Gasto diario promedio</span>
+                    <p class="card-valor num" id="promedioDiario">$0</p>
+                </div>
+            </div>
+            <div class="bloque">
+                <div class="bloque-encabezado">
+                    <h3>Mis cuentas</h3>
+                    <button class="btn-link" data-seccion="cuentas" type="button">Ver todas</button>
+                </div>
+                <ul class="lista-categorias-mini" id="resumenCuentas"></ul>
             </div>
             <div class="bloque">
                 <div class="bloque-encabezado">
@@ -109,42 +142,57 @@
             </div>
             <div class="bloque">
                 <div class="bloque-encabezado">
-                    <h3>Resumen de categorías</h3>
+                    <h3>Presupuesto por categoría</h3>
                     <button class="btn-link" data-seccion="categorias" type="button">Ver todas</button>
                 </div>
                 <ul class="lista-categorias-mini" id="resumenCategorias"></ul>
             </div>
         </section>
+        <section class="seccion" id="cuentas">
+            <div class="seccion-encabezado">
+                <h2>Cuentas</h2>
+                <p class="seccion-descripcion">Dónde está tu dinero hoy.</p>
+            </div>
+            <button class="btn btn-primario btn-bloque" id="btnNuevaCuenta" type="button">
+                <i class="ph ph-plus" aria-hidden="true"></i> Nueva cuenta
+            </button>
+            <ul class="lista-movimientos" id="listaCuentas"></ul>
+        </section>
+        <section class="seccion" id="movimientos">
+            <div class="seccion-encabezado">
+                <h2>Movimientos</h2>
+                <p class="seccion-descripcion">Ingresos, gastos y transferencias del mes.</p>
+            </div>
+            <div class="barra-buscador">
+                <i class="ph ph-magnifying-glass icono-buscar" aria-hidden="true"></i>
+                <input type="search" id="buscador" placeholder="Buscar por descripción..." aria-label="Buscar movimientos">
+            </div>
+            <div class="filtros" id="filtrosMovimientos" role="group" aria-label="Filtrar por tipo">
+                <button class="filtro-btn activa" data-filtro="todos" type="button" aria-pressed="true">Todos</button>
+                <button class="filtro-btn" data-filtro="ingreso" type="button" aria-pressed="false">Ingresos</button>
+                <button class="filtro-btn" data-filtro="gasto" type="button" aria-pressed="false">Gastos</button>
+                <button class="filtro-btn" data-filtro="transferencia" type="button" aria-pressed="false">Transferencias</button>
+            </div>
+            <ul class="lista-movimientos" id="listaMovimientos"></ul>
+        </section>
         <section class="seccion" id="categorias">
             <div class="seccion-encabezado">
                 <h2>Categorías</h2>
-                <p class="seccion-descripcion">Organizá tu presupuesto por rubro.</p>
+                <p class="seccion-descripcion">Organizá tus gastos con presupuesto mensual y tus ingresos por origen.</p>
+            </div>
+            <div class="filtros" id="filtrosCategorias" role="group" aria-label="Tipo de categoría">
+                <button class="filtro-btn activa" data-tipo-categoria="gasto" type="button" aria-pressed="true">Gastos</button>
+                <button class="filtro-btn" data-tipo-categoria="ingreso" type="button" aria-pressed="false">Ingresos</button>
             </div>
             <button class="btn btn-primario btn-bloque" id="btnNuevaCategoria" type="button">
                 <i class="ph ph-plus" aria-hidden="true"></i> Nueva categoría
             </button>
             <ul class="lista-categorias" id="listaCategorias"></ul>
         </section>
-        <section class="seccion" id="movimientos">
-            <div class="seccion-encabezado">
-                <h2>Movimientos</h2>
-                <p class="seccion-descripcion">Tu historial de ingresos y gastos.</p>
-            </div>
-            <div class="barra-buscador">
-                <i class="ph ph-magnifying-glass icono-buscar" aria-hidden="true"></i>
-                <input type="search" id="buscador" placeholder="Buscar por descripción..." aria-label="Buscar movimientos">
-            </div>
-            <div class="filtros" role="group" aria-label="Filtrar por tipo">
-                <button class="filtro-btn activa" data-filtro="todos" type="button" aria-pressed="true">Todos</button>
-                <button class="filtro-btn" data-filtro="ingreso" type="button" aria-pressed="false">Ingresos</button>
-                <button class="filtro-btn" data-filtro="gasto" type="button" aria-pressed="false">Gastos</button>
-            </div>
-            <ul class="lista-movimientos" id="listaMovimientos"></ul>
-        </section>
         <section class="seccion" id="estadisticas">
             <div class="seccion-encabezado">
                 <h2>Estadísticas</h2>
-                <p class="seccion-descripcion">Cómo se mueve tu dinero este mes.</p>
+                <p class="seccion-descripcion">Cómo se movió tu dinero en el mes.</p>
             </div>
             <div class="grid-stats">
                 <div class="card">
@@ -152,20 +200,24 @@
                     <p class="card-valor" id="statCategoriaTop">Sin datos</p>
                 </div>
                 <div class="card">
-                    <span class="card-label">Total gastado</span>
+                    <span class="card-label">Gastos</span>
                     <p class="card-valor num" id="statTotalGastado">$0</p>
                 </div>
                 <div class="card">
-                    <span class="card-label">Promedio diario</span>
+                    <span class="card-label">Ingresos</span>
+                    <p class="card-valor num" id="statTotalIngresos">$0</p>
+                </div>
+                <div class="card">
+                    <span class="card-label">Gasto diario promedio</span>
                     <p class="card-valor num" id="statPromedioDiario">$0</p>
                 </div>
                 <div class="card">
-                    <span class="card-label">Cantidad de movimientos</span>
-                    <p class="card-valor num" id="statCantidadMovimientos">0</p>
+                    <span class="card-label">Presupuesto usado</span>
+                    <p class="card-valor num" id="statPorcentajePresupuesto">0%</p>
                 </div>
                 <div class="card">
-                    <span class="card-label">% Consumido</span>
-                    <p class="card-valor num" id="statPorcentajeConsumido">0%</p>
+                    <span class="card-label">Gastos vs. mes anterior</span>
+                    <p class="card-valor num" id="statVariacion">—</p>
                 </div>
             </div>
             <div class="bloque">
@@ -179,6 +231,37 @@
     <button class="btn-flotante" id="btnNuevoMovimiento" type="button" aria-label="Nuevo movimiento">
         <i class="ph ph-plus" aria-hidden="true"></i>
     </button>
+    <div class="modal" id="modalCuenta" aria-hidden="true">
+        <div class="modal-fondo" data-cerrar="modalCuenta"></div>
+        <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="tituloModalCuenta">
+            <header class="modal-encabezado">
+                <h3 id="tituloModalCuenta">Nueva cuenta</h3>
+                <button class="modal-cerrar" type="button" data-cerrar="modalCuenta" aria-label="Cerrar">
+                    <i class="ph ph-x" aria-hidden="true"></i>
+                </button>
+            </header>
+            <form class="formulario" id="formCuenta">
+                <input type="hidden" id="cuentaId">
+                <label class="campo">
+                    <span>Nombre</span>
+                    <input type="text" id="cuentaNombre" placeholder="Ej: Banco Nación" maxlength="40" required>
+                </label>
+                <label class="campo">
+                    <span>Tipo</span>
+                    <select id="cuentaTipo" required></select>
+                </label>
+                <label class="campo">
+                    <span>Saldo inicial</span>
+                    <input type="number" id="cuentaSaldoInicial" placeholder="0" step="0.01" inputmode="decimal" required aria-describedby="ayudaSaldoInicial">
+                    <small class="campo-ayuda" id="ayudaSaldoInicial">Lo que tenía la cuenta al empezar a usar Walletera. En una tarjeta de crédito, la deuda va en negativo.</small>
+                </label>
+                <div class="formulario-acciones">
+                    <button class="btn btn-secundario" type="button" data-cerrar="modalCuenta">Cancelar</button>
+                    <button class="btn btn-primario" type="submit">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
     <div class="modal" id="modalCategoria" aria-hidden="true">
         <div class="modal-fondo" data-cerrar="modalCategoria"></div>
         <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="tituloModalCategoria">
@@ -190,13 +273,14 @@
             </header>
             <form class="formulario" id="formCategoria">
                 <input type="hidden" id="categoriaId">
+                <input type="hidden" id="categoriaTipo">
                 <input type="hidden" id="categoriaIcono">
                 <label class="campo">
                     <span>Nombre</span>
                     <input type="text" id="categoriaNombre" placeholder="Ej: Alimentación" maxlength="40" required>
                 </label>
-                <label class="campo">
-                    <span>Presupuesto</span>
+                <label class="campo" id="campoPresupuesto">
+                    <span>Presupuesto mensual</span>
                     <input type="number" id="categoriaPresupuesto" placeholder="0" min="0" step="0.01" inputmode="decimal" required>
                 </label>
                 <div class="campo">
@@ -221,11 +305,12 @@
             </header>
             <form class="formulario" id="formMovimiento">
                 <input type="hidden" id="movimientoId">
-                <div class="toggle-tipo">
+                <input type="hidden" id="movimientoTipo" value="gasto">
+                <div class="toggle-tipo" role="group" aria-label="Tipo de movimiento">
                     <button type="button" class="toggle-btn activa" data-tipo="gasto" aria-pressed="true">Gasto</button>
                     <button type="button" class="toggle-btn" data-tipo="ingreso" aria-pressed="false">Ingreso</button>
+                    <button type="button" class="toggle-btn" data-tipo="transferencia" aria-pressed="false">Transferencia</button>
                 </div>
-                <input type="hidden" id="movimientoTipo" value="gasto">
                 <label class="campo">
                     <span>Descripción</span>
                     <input type="text" id="movimientoDescripcion" placeholder="Ej: Compra supermercado" maxlength="80" required>
@@ -233,6 +318,14 @@
                 <label class="campo">
                     <span>Monto</span>
                     <input type="number" id="movimientoMonto" placeholder="0" min="0.01" step="0.01" inputmode="decimal" required>
+                </label>
+                <label class="campo">
+                    <span id="etiquetaCuenta">Cuenta</span>
+                    <select id="movimientoCuenta" required></select>
+                </label>
+                <label class="campo" id="campoCuentaDestino" hidden>
+                    <span>Hacia</span>
+                    <select id="movimientoCuentaDestino"></select>
                 </label>
                 <label class="campo" id="campoCategoria">
                     <span>Categoría</span>

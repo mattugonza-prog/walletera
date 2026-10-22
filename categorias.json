@@ -1,12 +1,17 @@
 [
-    { "nombre": "Alimentación",    "icono": "🍔", "presupuesto": 150000 },
-    { "nombre": "Transporte",      "icono": "🚗", "presupuesto": 50000  },
-    { "nombre": "Vivienda",        "icono": "🏠", "presupuesto": 200000 },
-    { "nombre": "Salud",           "icono": "💊", "presupuesto": 40000  },
-    { "nombre": "Educación",       "icono": "📚", "presupuesto": 30000  },
-    { "nombre": "Entretenimiento", "icono": "🎬", "presupuesto": 25000  },
-    { "nombre": "Servicios",       "icono": "💡", "presupuesto": 60000  },
-    { "nombre": "Indumentaria",    "icono": "👕", "presupuesto": 35000  },
-    { "nombre": "Mascotas",        "icono": "🐶", "presupuesto": 20000  },
-    { "nombre": "Ahorro",          "icono": "💰", "presupuesto": 100000 }
+    { "nombre": "Alimentación",    "icono": "🍔", "presupuesto": 150000, "tipo": "gasto" },
+    { "nombre": "Transporte",      "icono": "🚗", "presupuesto": 50000,  "tipo": "gasto" },
+    { "nombre": "Vivienda",        "icono": "🏠", "presupuesto": 200000, "tipo": "gasto" },
+    { "nombre": "Salud",           "icono": "💊", "presupuesto": 40000,  "tipo": "gasto" },
+    { "nombre": "Educación",       "icono": "📚", "presupuesto": 30000,  "tipo": "gasto" },
+    { "nombre": "Entretenimiento", "icono": "🎬", "presupuesto": 25000,  "tipo": "gasto" },
+    { "nombre": "Servicios",       "icono": "💡", "presupuesto": 60000,  "tipo": "gasto" },
+    { "nombre": "Indumentaria",    "icono": "👕", "presupuesto": 35000,  "tipo": "gasto" },
+    { "nombre": "Mascotas",        "icono": "🐶", "presupuesto": 20000,  "tipo": "gasto" },
+    { "nombre": "Ahorro",          "icono": "💰", "presupuesto": 100000, "tipo": "gasto" },
+    { "nombre": "Sueldo",          "icono": "💼", "presupuesto": 0,      "tipo": "ingreso" },
+    { "nombre": "Freelance",       "icono": "💻", "presupuesto": 0,      "tipo": "ingreso" },
+    { "nombre": "Ventas",          "icono": "🛍️", "presupuesto": 0,      "tipo": "ingreso" },
+    { "nombre": "Inversiones",     "icono": "📈", "presupuesto": 0,      "tipo": "ingreso" },
+    { "nombre": "Otros ingresos",  "icono": "💵", "presupuesto": 0,      "tipo": "ingreso" }
 ]

@@ -1,21 +1,25 @@
 // ===== Walletera | main.js =====
 // Capa de presentación: DOM, eventos, render y librerías externas.
 import {
+    TIPOS_CUENTA,
     inicializarDatos,
     obtenerGruposIconos, primerIcono,
-    obtenerFondoMensual, setearFondoMensual,
+    obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
+    contarMovimientosDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
     obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria,
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
     buscarYFiltrar,
-    periodoActual, nombrePeriodo, fechaHoy, esFechaISO,
-    calcularResumen, calcularPromedioDiario, obtenerCategoriasConGasto, obtenerCategoriaMasGastada,
-    obtenerDatosGrafico,
+    periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
+    calcularResumen, calcularPromedioDiario, calcularVariacionGastos,
+    obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
     formatearMoneda, formatearFecha
 } from './js/datos.js';
 
 // ===== Estado de UI =====
+let periodo = periodoActual();
 let filtroActual = 'todos';
 let busquedaActual = '';
+let tipoCategoriaActual = 'gasto';
 let graficoCategorias = null;
 let focoPrevio = null;
 
@@ -44,8 +48,10 @@ async function iniciar() {
     mostrarSkeletons();
     await inicializarDatos();
     configurarNavegacion();
+    configurarPeriodo();
     configurarModales();
     configurarListas();
+    configurarFormularioCuenta();
     configurarFormularioCategoria();
     configurarFormularioMovimiento();
     configurarBuscadorYFiltros();
@@ -54,7 +60,9 @@ async function iniciar() {
 }
 
 function renderizarTodo() {
+    renderizarPeriodo();
     renderizarDashboard();
+    renderizarCuentas();
     renderizarCategorias();
     renderizarMovimientos();
     renderizarEstadisticas();
@@ -93,14 +101,34 @@ function irASeccion(idSeccion) {
         if (activa) b.setAttribute('aria-current', 'page');
         else b.removeAttribute('aria-current');
     });
+    // Los saldos de cuentas son acumulados: el selector de mes no aplica ahí.
+    $('selectorPeriodo').hidden = idSeccion === 'cuentas';
     if (idSeccion === 'estadisticas') renderizarGrafico();
+}
+
+// ===== Selector de período =====
+function configurarPeriodo() {
+    $('btnPeriodoAnterior').addEventListener('click', () => cambiarPeriodo(-1));
+    $('btnPeriodoSiguiente').addEventListener('click', () => cambiarPeriodo(1));
+}
+
+function cambiarPeriodo(meses) {
+    const nuevo = desplazarPeriodo(periodo, meses);
+    if (nuevo > periodoActual()) return;
+    periodo = nuevo;
+    renderizarTodo();
+}
+
+function renderizarPeriodo() {
+    $('periodoNombre').textContent = nombrePeriodo(periodo);
+    $('btnPeriodoSiguiente').disabled = periodo >= periodoActual();
 }
 
 // ===== Skeletons de carga =====
 function mostrarSkeletons() {
     const filas = n => '<li class="skeleton skel-fila"></li>'.repeat(n);
     ['ultimosMovimientos', 'listaMovimientos'].forEach(id => { $(id).innerHTML = filas(4); });
-    ['resumenCategorias', 'listaCategorias'].forEach(id => { $(id).innerHTML = filas(3); });
+    ['resumenCuentas', 'resumenCategorias', 'listaCuentas', 'listaCategorias'].forEach(id => { $(id).innerHTML = filas(3); });
 }
 
 // ===== Estado vacío =====
@@ -112,64 +140,127 @@ function htmlVacio(icono, titulo, sub) {
     </li>`;
 }
 
+const formatearPorcentaje = valor => `${valor.toFixed(1)}%`;
+
+function formatearConSigno(monto) {
+    return monto > 0 ? `+ ${formatearMoneda(monto)}` : formatearMoneda(monto);
+}
+
 // ===== Dashboard =====
 function renderizarDashboard() {
-    const resumen = calcularResumen();
-    $('periodoSaldo').textContent         = nombrePeriodo(periodoActual());
-    $('saldoDisponible').textContent      = formatearMoneda(resumen.saldo);
-    $('fondoMensual').textContent         = formatearMoneda(resumen.fondo);
-    $('ingresosMes').textContent          = formatearMoneda(resumen.ingresos);
-    $('totalGastado').textContent         = formatearMoneda(resumen.gastos);
-    $('cantidadMovimientos').textContent  = resumen.cantidad;
-    $('porcentajeUtilizado').textContent  = `${resumen.porcentajeUtilizado.toFixed(1)}%`;
+    const resumen = calcularResumen(periodo);
+    const cantidadCuentas = obtenerCuentas().length;
+    $('saldoTotal').textContent            = formatearMoneda(calcularSaldoTotal());
+    $('saldoCuentas').textContent          = cantidadCuentas === 1 ? 'En 1 cuenta' : `En ${cantidadCuentas} cuentas`;
+    $('ingresosMes').textContent           = formatearMoneda(resumen.ingresos);
+    $('gastosMes').textContent             = formatearMoneda(resumen.gastos);
+    $('resultadoMes').textContent          = formatearConSigno(resumen.resultado);
+    $('cantidadMovimientos').textContent   = resumen.cantidad;
+    $('porcentajePresupuesto').textContent = formatearPorcentaje(resumen.porcentajePresupuesto);
+    $('promedioDiario').textContent        = formatearMoneda(calcularPromedioDiario(periodo));
+    renderizarResumenCuentas();
     renderizarUltimosMovimientos();
     renderizarResumenCategorias();
 }
 
+function renderizarResumenCuentas() {
+    const cuentas = obtenerCuentasConSaldo();
+    $('resumenCuentas').innerHTML = cuentas.length
+        ? cuentas.map(c => `
+            <li class="categoria-mini">
+                <span class="categoria-mini-icono"><i class="ph ${TIPOS_CUENTA[c.tipo].icono}" aria-hidden="true"></i></span>
+                <span class="categoria-mini-nombre">${esc(c.nombre)}</span>
+                <span class="categoria-mini-monto ${c.saldo < 0 ? 'negativo' : ''}">${formatearMoneda(c.saldo)}</span>
+            </li>
+        `).join('')
+        : htmlVacio('ph-wallet', 'No hay cuentas', 'Creá una para empezar a registrar movimientos.');
+}
+
 function renderizarUltimosMovimientos() {
-    const ultimos = obtenerMovimientos().slice(0, 5);
+    const ultimos = obtenerMovimientos(periodo).slice(0, 5);
     $('ultimosMovimientos').innerHTML = ultimos.length
         ? ultimos.map((m, i) => crearHTMLMovimiento(m, false, i)).join('')
-        : htmlVacio('ph-tray', 'Todavía no hay movimientos', 'Tocá el botón + para registrar el primero.');
+        : htmlVacio('ph-tray', 'Sin movimientos este mes', 'Tocá el botón + para registrar uno.');
 }
 
 function renderizarResumenCategorias() {
-    const cats = obtenerCategoriasConGasto();
+    const cats = obtenerCategoriasConMonto('gasto', periodo);
     $('resumenCategorias').innerHTML = cats.length
         ? cats.slice(0, 5).map(c => `
             <li class="categoria-mini">
                 <span class="categoria-mini-icono">${esc(c.icono)}</span>
                 <span class="categoria-mini-nombre">${esc(c.nombre)}</span>
-                <span class="categoria-mini-monto">${formatearMoneda(c.gastado)} / ${formatearMoneda(c.presupuesto)}</span>
+                <span class="categoria-mini-monto">${formatearMoneda(c.monto)} / ${formatearMoneda(c.presupuesto)}</span>
             </li>
         `).join('')
-        : htmlVacio('ph-squares-four', 'No hay categorías');
+        : htmlVacio('ph-squares-four', 'No hay categorías de gasto');
+}
+
+// ===== Cuentas =====
+function renderizarCuentas() {
+    const cuentas = obtenerCuentasConSaldo();
+    if (cuentas.length === 0) {
+        $('listaCuentas').innerHTML = htmlVacio('ph-wallet', 'Todavía no hay cuentas', 'Creá la primera con el botón de arriba.');
+        return;
+    }
+    $('listaCuentas').innerHTML = cuentas.map((c, i) => {
+        const nombre = esc(c.nombre);
+        const id = esc(c.id);
+        return `
+            <li class="movimiento cuenta" style="--i:${i}">
+                <span class="movimiento-icono"><i class="ph ${TIPOS_CUENTA[c.tipo].icono}" aria-hidden="true"></i></span>
+                <div class="movimiento-info">
+                    <div class="movimiento-descripcion">${nombre}</div>
+                    <div class="movimiento-meta">${TIPOS_CUENTA[c.tipo].nombre}</div>
+                </div>
+                <div class="movimiento-monto ${c.saldo < 0 ? 'negativo' : ''}">${formatearMoneda(c.saldo)}</div>
+                <div class="movimiento-acciones">
+                    <button class="movimiento-accion" type="button" data-editar-cuenta="${id}" aria-label="Editar ${nombre}"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
+                    <button class="movimiento-accion peligro" type="button" data-eliminar-cuenta="${id}" aria-label="Eliminar ${nombre}"><i class="ph ph-trash" aria-hidden="true"></i></button>
+                </div>
+            </li>
+        `;
+    }).join('');
 }
 
 // ===== Categorías =====
 function renderizarCategorias() {
     const cont = $('listaCategorias');
-    const cats = obtenerCategoriasConGasto();
+    const cats = obtenerCategoriasConMonto(tipoCategoriaActual, periodo);
     if (cats.length === 0) {
         cont.innerHTML = htmlVacio('ph-squares-four', 'Todavía no hay categorías', 'Creá la primera con el botón de arriba.');
         return;
     }
+    const mes = nombrePeriodo(periodo).split(' ')[0];
     cont.innerHTML = cats.map((c, i) => {
-        const disponible = c.presupuesto - c.gastado;
-        const porcentaje = c.presupuesto > 0 ? (c.gastado / c.presupuesto) * 100 : 0;
-        const salud = porcentaje >= 100 ? 'alerta' : (porcentaje >= 80 ? 'cerca' : '');
         const nombre = esc(c.nombre);
         const id = esc(c.id);
+        const encabezado = `
+            <div class="categoria-encabezado">
+                <span class="categoria-icono">${esc(c.icono)}</span>
+                <span class="categoria-nombre">${nombre}</span>
+                <div class="categoria-acciones">
+                    <button class="movimiento-accion" type="button" data-editar-categoria="${id}" aria-label="Editar ${nombre}"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
+                    <button class="movimiento-accion peligro" type="button" data-eliminar-categoria="${id}" aria-label="Eliminar ${nombre}"><i class="ph ph-trash" aria-hidden="true"></i></button>
+                </div>
+            </div>`;
+        if (c.tipo === 'ingreso') {
+            return `
+                <li class="categoria" style="--i:${i}">
+                    ${encabezado}
+                    <div class="categoria-dato">
+                        <span>Recibido en ${mes}</span>
+                        <strong>${formatearMoneda(c.monto)}</strong>
+                    </div>
+                </li>
+            `;
+        }
+        const disponible = c.presupuesto - c.monto;
+        const porcentaje = c.presupuesto > 0 ? (c.monto / c.presupuesto) * 100 : 0;
+        const salud = porcentaje >= 100 ? 'alerta' : (porcentaje >= 80 ? 'cerca' : '');
         return `
             <li class="categoria" style="--i:${i}">
-                <div class="categoria-encabezado">
-                    <span class="categoria-icono">${esc(c.icono)}</span>
-                    <span class="categoria-nombre">${nombre}</span>
-                    <div class="categoria-acciones">
-                        <button class="movimiento-accion" type="button" data-editar-categoria="${id}" aria-label="Editar ${nombre}"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
-                        <button class="movimiento-accion peligro" type="button" data-eliminar-categoria="${id}" aria-label="Eliminar ${nombre}"><i class="ph ph-trash" aria-hidden="true"></i></button>
-                    </div>
-                </div>
+                ${encabezado}
                 <div class="categoria-datos">
                     <div class="categoria-dato">
                         <span>Presupuesto</span>
@@ -177,7 +268,7 @@ function renderizarCategorias() {
                     </div>
                     <div class="categoria-dato">
                         <span>Gastado</span>
-                        <strong>${formatearMoneda(c.gastado)}</strong>
+                        <strong>${formatearMoneda(c.monto)}</strong>
                     </div>
                     <div class="categoria-dato">
                         <span>Disponible</span>
@@ -187,7 +278,7 @@ function renderizarCategorias() {
                 <div class="barra-progreso">
                     <div class="barra-progreso-relleno ${salud}" data-w="${Math.min(porcentaje, 100)}" style="width:0"></div>
                 </div>
-                <div class="categoria-porcentaje">${porcentaje.toFixed(1)}% utilizado</div>
+                <div class="categoria-porcentaje">${formatearPorcentaje(porcentaje)} utilizado</div>
             </li>
         `;
     }).join('');
@@ -199,27 +290,32 @@ function renderizarCategorias() {
 
 // ===== Movimientos =====
 function renderizarMovimientos() {
-    const lista = buscarYFiltrar(busquedaActual, filtroActual);
+    const lista = buscarYFiltrar(busquedaActual, filtroActual, periodo);
     if (lista.length === 0) {
         $('listaMovimientos').innerHTML = busquedaActual || filtroActual !== 'todos'
-            ? htmlVacio('ph-magnifying-glass', 'Sin resultados', 'Probá con otro texto o filtro.')
-            : htmlVacio('ph-tray', 'Todavía no hay movimientos', 'Tocá el botón + para registrar el primero.');
+            ? htmlVacio('ph-magnifying-glass', 'Sin resultados', 'Probá con otro texto, filtro o mes.')
+            : htmlVacio('ph-tray', 'Sin movimientos este mes', 'Tocá el botón + para registrar uno.');
         return;
     }
     $('listaMovimientos').innerHTML = lista.map((m, i) => crearHTMLMovimiento(m, true, i)).join('');
 }
 
+const nombreCuenta = id => esc(obtenerCuentaPorId(id)?.nombre ?? 'Cuenta eliminada');
+
 function crearHTMLMovimiento(m, conAcciones, indice = 0) {
-    const cat = m.categoriaId ? obtenerCategoriaPorId(m.categoriaId) : null;
-    const esIngreso = m.tipo === 'ingreso';
-    let icono = '<i class="ph ph-receipt" aria-hidden="true"></i>';
-    let etiqueta = 'Sin categoría';
-    if (esIngreso) {
-        icono = '<i class="ph ph-arrow-down-left" aria-hidden="true"></i>';
-        etiqueta = 'Ingreso';
-    } else if (cat) {
-        icono = esc(cat.icono);
-        etiqueta = esc(cat.nombre);
+    let icono;
+    let detalle;
+    let monto;
+    if (m.tipo === 'transferencia') {
+        icono = '<i class="ph ph-arrows-left-right" aria-hidden="true"></i>';
+        detalle = `${nombreCuenta(m.cuentaId)} → ${nombreCuenta(m.cuentaDestinoId)}`;
+        monto = formatearMoneda(m.monto);
+    } else {
+        const cat = m.categoriaId ? obtenerCategoriaPorId(m.categoriaId) : null;
+        const iconoDefecto = m.tipo === 'ingreso' ? 'ph-arrow-down-left' : 'ph-receipt';
+        icono = cat ? esc(cat.icono) : `<i class="ph ${iconoDefecto}" aria-hidden="true"></i>`;
+        detalle = `${cat ? esc(cat.nombre) : 'Sin categoría'} · ${nombreCuenta(m.cuentaId)}`;
+        monto = `${m.tipo === 'ingreso' ? '+' : '-'} ${formatearMoneda(m.monto)}`;
     }
     const descripcion = esc(m.descripcion);
     const id = esc(m.id);
@@ -234,69 +330,89 @@ function crearHTMLMovimiento(m, conAcciones, indice = 0) {
             <span class="movimiento-icono">${icono}</span>
             <div class="movimiento-info">
                 <div class="movimiento-descripcion">${descripcion}</div>
-                <div class="movimiento-meta">${etiqueta} · ${formatearFecha(m.fecha)}</div>
+                <div class="movimiento-meta">${detalle} · ${formatearFecha(m.fecha)}</div>
             </div>
-            <div class="movimiento-monto">${esIngreso ? '+' : '-'} ${formatearMoneda(m.monto)}</div>
+            <div class="movimiento-monto">${monto}</div>
             ${acciones}
         </li>
     `;
 }
 
 // Un solo listener por lista (delegación), en lugar de re-enlazar en cada render.
-function configurarListas() {
-    $('listaCategorias').addEventListener('click', e => {
-        const editar = e.target.closest('[data-editar-categoria]');
-        const eliminar = e.target.closest('[data-eliminar-categoria]');
-        if (editar) abrirModalCategoria(editar.dataset.editarCategoria);
-        else if (eliminar) confirmarEliminarCategoria(eliminar.dataset.eliminarCategoria);
-    });
-    $('listaMovimientos').addEventListener('click', e => {
-        const editar = e.target.closest('[data-editar-movimiento]');
-        const eliminar = e.target.closest('[data-eliminar-movimiento]');
-        if (editar) abrirModalMovimiento(editar.dataset.editarMovimiento);
-        else if (eliminar) confirmarEliminarMovimiento(eliminar.dataset.eliminarMovimiento);
-    });
-    $('selectorEmojis').addEventListener('click', e => {
-        const btn = e.target.closest('.emoji-btn');
-        if (btn) seleccionarEmoji(btn.dataset.emoji);
+function delegar(idLista, acciones) {
+    $(idLista).addEventListener('click', e => {
+        for (const [atributo, accion] of Object.entries(acciones)) {
+            const btn = e.target.closest(`[data-${atributo}]`);
+            if (btn) return accion(btn.getAttribute(`data-${atributo}`));
+        }
     });
 }
 
+function configurarListas() {
+    delegar('listaCuentas', {
+        'editar-cuenta': id => abrirModalCuenta(id),
+        'eliminar-cuenta': confirmarEliminarCuenta
+    });
+    delegar('listaCategorias', {
+        'editar-categoria': id => abrirModalCategoria(id),
+        'eliminar-categoria': confirmarEliminarCategoria
+    });
+    delegar('listaMovimientos', {
+        'editar-movimiento': id => abrirModalMovimiento(id),
+        'eliminar-movimiento': confirmarEliminarMovimiento
+    });
+    delegar('selectorEmojis', { emoji: seleccionarEmoji });
+}
+
 // ===== Buscador y filtros =====
+function activarEnGrupo(grupo, activo) {
+    grupo.querySelectorAll('.filtro-btn').forEach(b => {
+        b.classList.toggle('activa', b === activo);
+        b.setAttribute('aria-pressed', String(b === activo));
+    });
+}
+
 function configurarBuscadorYFiltros() {
     $('buscador').addEventListener('input', e => {
         busquedaActual = e.target.value;
         renderizarMovimientos();
     });
-    document.querySelectorAll('.filtro-btn').forEach(btn => {
+    $('filtrosMovimientos').querySelectorAll('.filtro-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.filtro-btn').forEach(b => {
-                const activa = b === btn;
-                b.classList.toggle('activa', activa);
-                b.setAttribute('aria-pressed', String(activa));
-            });
+            activarEnGrupo($('filtrosMovimientos'), btn);
             filtroActual = btn.dataset.filtro;
             renderizarMovimientos();
+        });
+    });
+    $('filtrosCategorias').querySelectorAll('.filtro-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            activarEnGrupo($('filtrosCategorias'), btn);
+            tipoCategoriaActual = btn.dataset.tipoCategoria;
+            renderizarCategorias();
         });
     });
 }
 
 // ===== Estadísticas =====
 function renderizarEstadisticas() {
-    const resumen = calcularResumen();
-    const top = obtenerCategoriaMasGastada();
-    $('statCategoriaTop').textContent        = top ? `${top.icono} ${top.nombre}` : 'Sin datos';
-    $('statTotalGastado').textContent        = formatearMoneda(resumen.gastos);
-    $('statPromedioDiario').textContent      = formatearMoneda(calcularPromedioDiario());
-    $('statCantidadMovimientos').textContent = resumen.cantidad;
-    $('statPorcentajeConsumido').textContent = `${resumen.porcentajeUtilizado.toFixed(1)}%`;
+    const resumen = calcularResumen(periodo);
+    const top = obtenerCategoriaMasGastada(periodo);
+    const variacion = calcularVariacionGastos(periodo);
+    $('statCategoriaTop').textContent          = top ? `${top.icono} ${top.nombre}` : 'Sin datos';
+    $('statTotalGastado').textContent          = formatearMoneda(resumen.gastos);
+    $('statTotalIngresos').textContent         = formatearMoneda(resumen.ingresos);
+    $('statPromedioDiario').textContent        = formatearMoneda(calcularPromedioDiario(periodo));
+    $('statPorcentajePresupuesto').textContent = formatearPorcentaje(resumen.porcentajePresupuesto);
+    $('statVariacion').textContent             = variacion === null
+        ? '—'
+        : `${variacion > 0 ? '+' : ''}${formatearPorcentaje(variacion)}`;
 }
 
 function renderizarGrafico() {
     const ctx = $('graficoCategorias');
     if (!ctx || typeof Chart === 'undefined') return;
     const contenedor = ctx.parentElement;
-    const datos = obtenerDatosGrafico();
+    const datos = obtenerDatosGrafico(periodo);
     let aviso = contenedor.querySelector('.grafico-vacio');
 
     if (datos.length === 0) {
@@ -368,9 +484,12 @@ function prefiereMenosMovimiento() {
 
 // ===== Botones globales =====
 function configurarBotones() {
+    $('btnNuevaCuenta').addEventListener('click', () => abrirModalCuenta());
     $('btnNuevaCategoria').addEventListener('click', () => abrirModalCategoria());
     $('btnNuevoMovimiento').addEventListener('click', () => abrirModalMovimiento());
-    $('btnEditarFondo').addEventListener('click', editarFondoMensual);
+    document.querySelectorAll('[data-nuevo-movimiento]').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalMovimiento(null, btn.dataset.nuevoMovimiento));
+    });
 }
 
 // ===== Modales (apertura/cierre + foco accesible) =====
@@ -414,20 +533,102 @@ function manejarTeclasModal(e) {
     else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primero.focus(); }
 }
 
+// ===== Modal Cuenta =====
+function abrirModalCuenta(id) {
+    $('formCuenta').reset();
+    $('cuentaTipo').innerHTML = Object.entries(TIPOS_CUENTA)
+        .map(([clave, t]) => `<option value="${clave}">${t.nombre}</option>`)
+        .join('');
+    if (id) {
+        const cuenta = obtenerCuentaPorId(id);
+        if (!cuenta) return;
+        $('tituloModalCuenta').textContent = 'Editar cuenta';
+        $('cuentaId').value           = cuenta.id;
+        $('cuentaNombre').value       = cuenta.nombre;
+        $('cuentaTipo').value         = cuenta.tipo;
+        $('cuentaSaldoInicial').value = cuenta.saldoInicial;
+    } else {
+        $('tituloModalCuenta').textContent = 'Nueva cuenta';
+        $('cuentaId').value = '';
+        $('cuentaSaldoInicial').value = 0;
+    }
+    abrirModal('modalCuenta');
+}
+
+function configurarFormularioCuenta() {
+    $('formCuenta').addEventListener('submit', e => {
+        e.preventDefault();
+        const id           = $('cuentaId').value;
+        const nombre       = $('cuentaNombre').value;
+        const tipo         = $('cuentaTipo').value;
+        const saldoInicial = Number($('cuentaSaldoInicial').value);
+        if (!nombre.trim()) {
+            mostrarToast('Escribí un nombre para la cuenta', 'alerta');
+            return;
+        }
+        if (!Number.isFinite(saldoInicial)) {
+            mostrarToast('Ingresá un saldo inicial válido', 'alerta');
+            return;
+        }
+        if (id) {
+            editarCuenta(id, { nombre, tipo, saldoInicial });
+            mostrarToast('Cuenta actualizada');
+        } else {
+            crearCuenta({ nombre, tipo, saldoInicial });
+            mostrarToast('Cuenta creada');
+        }
+        cerrarModal('modalCuenta');
+        renderizarTodo();
+    });
+}
+
+function confirmarEliminarCuenta(id) {
+    const usos = contarMovimientosDeCuenta(id);
+    if (usos > 0) {
+        Swal.fire(opcionesSwal({
+            title: 'No se puede eliminar',
+            text: `La cuenta tiene ${usos} ${usos === 1 ? 'movimiento' : 'movimientos'}. Eliminalos o pasalos a otra cuenta primero.`,
+            icon: 'info',
+            confirmButtonColor: '#6C5CE7'
+        }));
+        return;
+    }
+    Swal.fire(opcionesSwal({
+        title: '¿Eliminar cuenta?',
+        text: 'Esta acción no se puede deshacer.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#FF5C5C',
+        cancelButtonColor: '#6B7280'
+    })).then(resultado => {
+        if (resultado.isConfirmed && eliminarCuenta(id)) {
+            mostrarToast('Cuenta eliminada');
+            renderizarTodo();
+        }
+    });
+}
+
 // ===== Modal Categoría =====
 function abrirModalCategoria(id) {
     $('formCategoria').reset();
     renderizarSelectorEmojis();
-    if (id) {
-        const cat = obtenerCategoriaPorId(id);
-        if (!cat) return;
-        $('tituloModalCategoria').textContent = 'Editar categoría';
+    const cat = id ? obtenerCategoriaPorId(id) : null;
+    if (id && !cat) return;
+    const tipo = cat ? cat.tipo : tipoCategoriaActual;
+    const deTipo = tipo === 'ingreso' ? 'de ingreso' : 'de gasto';
+    $('categoriaTipo').value = tipo;
+    $('campoPresupuesto').hidden = tipo === 'ingreso';
+    $('categoriaPresupuesto').required = tipo === 'gasto';
+    if (cat) {
+        $('tituloModalCategoria').textContent = `Editar categoría ${deTipo}`;
         $('categoriaId').value          = cat.id;
         $('categoriaNombre').value      = cat.nombre;
         $('categoriaPresupuesto').value = cat.presupuesto;
         seleccionarEmoji(cat.icono);
     } else {
-        $('tituloModalCategoria').textContent = 'Nueva categoría';
+        $('tituloModalCategoria').textContent = `Nueva categoría ${deTipo}`;
         $('categoriaId').value = '';
         seleccionarEmoji(primerIcono());
     }
@@ -460,9 +661,10 @@ function configurarFormularioCategoria() {
     $('formCategoria').addEventListener('submit', e => {
         e.preventDefault();
         const id          = $('categoriaId').value;
+        const tipo        = $('categoriaTipo').value;
         const nombre      = $('categoriaNombre').value;
         const icono       = $('categoriaIcono').value;
-        const presupuesto = $('categoriaPresupuesto').value;
+        const presupuesto = tipo === 'gasto' ? $('categoriaPresupuesto').value : 0;
         if (!nombre.trim()) {
             mostrarToast('Escribí un nombre para la categoría', 'alerta');
             return;
@@ -475,7 +677,7 @@ function configurarFormularioCategoria() {
             editarCategoria(id, { nombre, icono, presupuesto });
             mostrarToast('Categoría actualizada');
         } else {
-            crearCategoria({ nombre, icono, presupuesto });
+            crearCategoria({ nombre, icono, presupuesto, tipo });
             mostrarToast('Categoría creada');
         }
         cerrarModal('modalCategoria');
@@ -503,44 +705,69 @@ function confirmarEliminarCategoria(id) {
 }
 
 // ===== Modal Movimiento =====
-function abrirModalMovimiento(id) {
+const opcionesCuentas = () => obtenerCuentas()
+    .map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`)
+    .join('');
+
+function abrirModalMovimiento(id, tipoInicial = 'gasto') {
+    if (obtenerCuentas().length === 0) {
+        Swal.fire(opcionesSwal({
+            title: 'Primero creá una cuenta',
+            text: 'Cada movimiento sale de una cuenta o entra en una: efectivo, banco, billetera virtual o tarjeta.',
+            icon: 'info',
+            confirmButtonColor: '#6C5CE7'
+        }));
+        return;
+    }
+    const m = id ? obtenerMovimientoPorId(id) : null;
+    if (id && !m) return;
     $('formMovimiento').reset();
-    cargarSelectCategorias();
-    if (id) {
-        const m = obtenerMovimientoPorId(id);
-        if (!m) return;
+    $('movimientoCuenta').innerHTML = opcionesCuentas();
+    $('movimientoCuentaDestino').innerHTML = opcionesCuentas();
+    seleccionarTipo(m ? m.tipo : tipoInicial);
+    if (m) {
         $('tituloModalMovimiento').textContent = 'Editar movimiento';
         $('movimientoId').value          = m.id;
         $('movimientoDescripcion').value = m.descripcion;
         $('movimientoMonto').value       = m.monto;
         $('movimientoFecha').value       = m.fecha;
+        if (obtenerCuentaPorId(m.cuentaId)) $('movimientoCuenta').value = m.cuentaId;
+        if (m.cuentaDestinoId && obtenerCuentaPorId(m.cuentaDestinoId)) $('movimientoCuentaDestino').value = m.cuentaDestinoId;
         if (m.categoriaId && obtenerCategoriaPorId(m.categoriaId)) $('movimientoCategoria').value = m.categoriaId;
-        seleccionarTipo(m.tipo);
     } else {
         $('tituloModalMovimiento').textContent = 'Nuevo movimiento';
         $('movimientoId').value    = '';
         $('movimientoFecha').value = fechaHoy();
-        seleccionarTipo('gasto');
+        const cuentas = obtenerCuentas();
+        if (cuentas[1]) $('movimientoCuentaDestino').value = cuentas[1].id;
     }
     abrirModal('modalMovimiento');
 }
 
-function cargarSelectCategorias() {
-    const opciones = obtenerCategorias()
+function cargarSelectCategorias(tipo) {
+    const select = $('movimientoCategoria');
+    const previa = select.value;
+    const opciones = obtenerCategorias(tipo)
         .map(c => `<option value="${esc(c.id)}">${esc(c.icono)} ${esc(c.nombre)}</option>`)
         .join('');
-    $('movimientoCategoria').innerHTML = '<option value="">Sin categoría</option>' + opciones;
+    select.innerHTML = '<option value="">Sin categoría</option>' + opciones;
+    if (obtenerCategoriaPorId(previa)?.tipo === tipo) select.value = previa;
 }
 
-// Los ingresos no llevan categoría: las categorías son rubros de gasto con presupuesto.
 function seleccionarTipo(tipo) {
+    const esTransferencia = tipo === 'transferencia';
     $('movimientoTipo').value = tipo;
     document.querySelectorAll('.toggle-btn').forEach(btn => {
         const activa = btn.dataset.tipo === tipo;
         btn.classList.toggle('activa', activa);
         btn.setAttribute('aria-pressed', String(activa));
     });
-    $('campoCategoria').hidden = tipo !== 'gasto';
+    $('etiquetaCuenta').textContent = esTransferencia ? 'Desde' : 'Cuenta';
+    $('campoCuentaDestino').hidden = !esTransferencia;
+    $('campoCategoria').hidden = esTransferencia;
+    $('movimientoDescripcion').required = !esTransferencia;
+    $('movimientoDescripcion').placeholder = esTransferencia ? 'Transferencia (opcional)' : 'Ej: Compra supermercado';
+    if (!esTransferencia) cargarSelectCategorias(tipo);
 }
 
 function configurarFormularioMovimiento() {
@@ -549,13 +776,16 @@ function configurarFormularioMovimiento() {
     });
     $('formMovimiento').addEventListener('submit', e => {
         e.preventDefault();
-        const id          = $('movimientoId').value;
-        const descripcion = $('movimientoDescripcion').value;
-        const monto       = Number($('movimientoMonto').value);
-        const categoriaId = $('movimientoCategoria').value;
-        const tipo        = $('movimientoTipo').value;
-        const fecha       = $('movimientoFecha').value;
-        if (!descripcion.trim()) {
+        const id              = $('movimientoId').value;
+        const tipo            = $('movimientoTipo').value;
+        const descripcion     = $('movimientoDescripcion').value;
+        const monto           = Number($('movimientoMonto').value);
+        const cuentaId        = $('movimientoCuenta').value;
+        const cuentaDestinoId = $('movimientoCuentaDestino').value;
+        const categoriaId     = $('movimientoCategoria').value;
+        const fecha           = $('movimientoFecha').value;
+        const esTransferencia = tipo === 'transferencia';
+        if (!esTransferencia && !descripcion.trim()) {
             mostrarToast('Escribí una descripción', 'alerta');
             return;
         }
@@ -563,17 +793,27 @@ function configurarFormularioMovimiento() {
             mostrarToast('El monto tiene que ser mayor a cero', 'alerta');
             return;
         }
+        if (!obtenerCuentaPorId(cuentaId)) {
+            mostrarToast('Elegí una cuenta', 'alerta');
+            return;
+        }
+        if (esTransferencia && (!obtenerCuentaPorId(cuentaDestinoId) || cuentaDestinoId === cuentaId)) {
+            mostrarToast(obtenerCuentas().length < 2
+                ? 'Necesitás al menos dos cuentas para transferir'
+                : 'Elegí una cuenta de destino distinta a la de origen', 'alerta');
+            return;
+        }
         if (!esFechaISO(fecha)) {
             mostrarToast('Elegí una fecha válida', 'alerta');
             return;
         }
-        const datos = { descripcion, monto, categoriaId, tipo, fecha };
+        const datos = { descripcion, monto, tipo, fecha, cuentaId, cuentaDestinoId, categoriaId };
         if (id) {
             editarMovimiento(id, datos);
             mostrarToast('Movimiento actualizado');
         } else {
             crearMovimiento(datos);
-            mostrarToast('Movimiento creado');
+            mostrarToast(esTransferencia ? 'Transferencia registrada' : 'Movimiento creado');
         }
         cerrarModal('modalMovimiento');
         renderizarTodo();
@@ -594,31 +834,6 @@ function confirmarEliminarMovimiento(id) {
         if (resultado.isConfirmed) {
             eliminarMovimiento(id);
             mostrarToast('Movimiento eliminado');
-            renderizarTodo();
-        }
-    });
-}
-
-// ===== Fondo mensual =====
-function editarFondoMensual() {
-    Swal.fire(opcionesSwal({
-        title: 'Definir fondo mensual',
-        input: 'number',
-        inputLabel: 'Monto disponible para cada mes',
-        inputValue: obtenerFondoMensual(),
-        inputAttributes: { min: 0, step: '0.01', inputmode: 'decimal' },
-        showCancelButton: true,
-        confirmButtonText: 'Guardar',
-        cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#6C5CE7',
-        inputValidator: valor => {
-            const monto = Number(valor);
-            if (valor === '' || !Number.isFinite(monto) || monto < 0) return 'Ingresá un monto válido';
-        }
-    })).then(resultado => {
-        if (resultado.isConfirmed) {
-            setearFondoMensual(resultado.value);
-            mostrarToast('Fondo mensual actualizado');
             renderizarTodo();
         }
     });

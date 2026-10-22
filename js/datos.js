@@ -3,15 +3,21 @@
 
 const CLAVES = {
     configuracion: 'walletera_configuracion',
+    cuentas:       'walletera_cuentas',
     categorias:    'walletera_categorias',
     movimientos:   'walletera_movimientos',
     version:       'walletera_version'
 };
 
 // Versión del esquema guardado. Cada salto tiene su paso en migrarDatos().
-const VERSION_DATOS = 3;
+const VERSION_DATOS = 4;
 
-const TIPOS = ['gasto', 'ingreso'];
+const TIPOS_CUENTA = {
+    efectivo:  { nombre: 'Efectivo',           icono: 'ph-money' },
+    banco:     { nombre: 'Cuenta bancaria',    icono: 'ph-bank' },
+    billetera: { nombre: 'Billetera virtual',  icono: 'ph-device-mobile' },
+    credito:   { nombre: 'Tarjeta de crédito', icono: 'ph-credit-card' }
+};
 
 // Catálogo mínimo por si iconos.json no se puede cargar.
 const GRUPOS_ICONOS_FALLBACK = [
@@ -25,7 +31,8 @@ const GRUPOS_ICONOS_FALLBACK = [
 ];
 
 // ===== Estado en memoria =====
-let configuracion = { fondoMensual: 0 };
+let configuracion = {};
+let cuentas       = [];
 let categorias    = [];
 let movimientos   = [];
 let gruposIconos  = [];
@@ -44,9 +51,9 @@ function escribir(clave, valor) {
     localStorage.setItem(clave, JSON.stringify(valor));
 }
 
-const guardarConfiguracion = () => escribir(CLAVES.configuracion, configuracion);
-const guardarCategorias    = () => escribir(CLAVES.categorias, categorias);
-const guardarMovimientos   = () => escribir(CLAVES.movimientos, movimientos);
+const guardarCuentas     = () => escribir(CLAVES.cuentas, cuentas);
+const guardarCategorias  = () => escribir(CLAVES.categorias, categorias);
+const guardarMovimientos = () => escribir(CLAVES.movimientos, movimientos);
 
 function generarId() {
     if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
@@ -80,6 +87,11 @@ function periodoActual() {
     return fechaHoy().slice(0, 7);
 }
 
+function desplazarPeriodo(periodo, meses) {
+    const [a, m] = periodo.split('-').map(Number);
+    return aFechaISO(new Date(a, m - 1 + meses, 1)).slice(0, 7);
+}
+
 function diasDelPeriodo(periodo) {
     const [a, m] = periodo.split('-').map(Number);
     return new Date(a, m, 0).getDate();
@@ -95,6 +107,8 @@ function nombrePeriodo(periodo) {
 // v2: ids numéricos, fecha como timestamp (parseada en UTC), ingresos con categoría,
 //     "gastado" y "saldoRestante" persistidos.
 // v3: ids string, fecha 'AAAA-MM-DD', ingresos sin categoría, solo datos de origen.
+// v4: cuentas con saldo inicial (reemplazan al "fondo mensual"), transferencias
+//     y categorías con tipo (gasto / ingreso).
 function timestampAFechaISO(ts) {
     const d = new Date(ts);
     // Los timestamps exactos a medianoche UTC vienen de new Date('AAAA-MM-DD'):
@@ -107,18 +121,20 @@ function timestampAFechaISO(ts) {
 
 function normalizarCategoria(c) {
     if (!c || typeof c.nombre !== 'string' || !c.nombre.trim()) return null;
-    const presupuesto = Number(c.presupuesto);
+    const presupuesto = Number(c.presupuesto ?? 0);
     if (!Number.isFinite(presupuesto) || presupuesto < 0) return null;
+    const tipo = c.tipo === 'ingreso' ? 'ingreso' : 'gasto';
     return {
         id: String(c.id ?? generarId()),
         nombre: c.nombre.trim(),
         icono: typeof c.icono === 'string' && c.icono ? c.icono : '💰',
-        presupuesto
+        tipo,
+        presupuesto: tipo === 'gasto' ? presupuesto : 0
     };
 }
 
-function normalizarMovimiento(m, idsCategorias) {
-    if (!m || typeof m.descripcion !== 'string' || !TIPOS.includes(m.tipo)) return null;
+function normalizarMovimientoV3(m, idsCategorias) {
+    if (!m || typeof m.descripcion !== 'string' || !['gasto', 'ingreso'].includes(m.tipo)) return null;
     const monto = Number(m.monto);
     if (!Number.isFinite(monto) || monto <= 0) return null;
     let fecha = m.fecha;
@@ -138,44 +154,79 @@ function normalizarMovimiento(m, idsCategorias) {
     };
 }
 
+// Hasta v3: validar y normalizar lo guardado.
+function migrarAV3({ categorias: cats, movimientos: movs }) {
+    const categoriasV3 = (Array.isArray(cats) ? cats : []).map(normalizarCategoria).filter(Boolean);
+    const ids = new Set(categoriasV3.map(c => c.id));
+    const movimientosV3 = (Array.isArray(movs) ? movs : [])
+        .map(m => normalizarMovimientoV3(m, ids))
+        .filter(Boolean);
+    return { categorias: categoriasV3, movimientos: movimientosV3 };
+}
+
+// v3 → v4: el fondo mensual pasa a ser el saldo inicial de una cuenta principal
+// a la que se asignan todos los movimientos existentes.
+function migrarAV4({ categorias: cats, movimientos: movs }, config) {
+    const fondo = Number(config.fondoMensual) || 0;
+    const cuentasV4 = [];
+    if (movs.length || fondo) {
+        cuentasV4.push({ id: generarId(), nombre: 'Cuenta principal', tipo: 'banco', saldoInicial: fondo });
+    }
+    const principal = cuentasV4[0]?.id ?? null;
+    const { fondoMensual, ...resto } = config;
+    return {
+        configuracion: resto,
+        cuentas: cuentasV4,
+        categorias: cats.map(c => ({ ...c, tipo: 'gasto' })),
+        movimientos: movs.map(m => ({ ...m, cuentaId: principal, cuentaDestinoId: null }))
+    };
+}
+
 function migrarDatos() {
     const version = Number(localStorage.getItem(CLAVES.version)) || 1;
-    if (version >= VERSION_DATOS) return;
+    if (version >= VERSION_DATOS) return { desde: version };
 
-    const rawCategorias  = localStorage.getItem(CLAVES.categorias);
-    const rawMovimientos = localStorage.getItem(CLAVES.movimientos);
-    if (rawCategorias || rawMovimientos) {
+    const crudo = {
+        configuracion: localStorage.getItem(CLAVES.configuracion),
+        categorias: localStorage.getItem(CLAVES.categorias),
+        movimientos: localStorage.getItem(CLAVES.movimientos)
+    };
+    if (crudo.categorias || crudo.movimientos || crudo.configuracion) {
         // Copia intacta de lo que había antes de migrar, por si algo sale mal.
-        localStorage.setItem(`walletera_respaldo_v${version}`, JSON.stringify({
-            categorias: rawCategorias,
-            movimientos: rawMovimientos,
-            configuracion: localStorage.getItem(CLAVES.configuracion)
-        }));
+        localStorage.setItem(`walletera_respaldo_v${version}`, JSON.stringify(crudo));
     }
 
-    const cats = leer(CLAVES.categorias, []);
-    const movs = leer(CLAVES.movimientos, []);
-    const categoriasValidas = (Array.isArray(cats) ? cats : []).map(normalizarCategoria).filter(Boolean);
-    const ids = new Set(categoriasValidas.map(c => c.id));
-    const movimientosValidos = (Array.isArray(movs) ? movs : [])
-        .map(m => normalizarMovimiento(m, ids))
-        .filter(Boolean);
+    const config = leer(CLAVES.configuracion, {});
+    const v3 = migrarAV3({ categorias: leer(CLAVES.categorias, []), movimientos: leer(CLAVES.movimientos, []) });
+    const v4 = migrarAV4(v3, config && typeof config === 'object' ? config : {});
 
-    escribir(CLAVES.categorias, categoriasValidas);
-    escribir(CLAVES.movimientos, movimientosValidos);
+    escribir(CLAVES.configuracion, v4.configuracion);
+    escribir(CLAVES.cuentas, v4.cuentas);
+    escribir(CLAVES.categorias, v4.categorias);
+    escribir(CLAVES.movimientos, v4.movimientos);
     localStorage.setItem(CLAVES.version, String(VERSION_DATOS));
+    return { desde: version };
 }
 
 // ===== Inicialización =====
 async function inicializarDatos() {
-    migrarDatos();
-    configuracion = { fondoMensual: 0, ...leer(CLAVES.configuracion, {}) };
-    configuracion.fondoMensual = Number(configuracion.fondoMensual) || 0;
-    categorias  = leer(CLAVES.categorias, []);
-    movimientos = leer(CLAVES.movimientos, []);
+    const { desde } = migrarDatos();
+    configuracion = leer(CLAVES.configuracion, {});
+    cuentas       = leer(CLAVES.cuentas, []);
+    categorias    = leer(CLAVES.categorias, []);
+    movimientos   = leer(CLAVES.movimientos, []);
     await cargarIconos();
-    if (categorias.length === 0 && movimientos.length === 0) {
-        await cargarCategoriasIniciales();
+
+    const sinDatos = categorias.length === 0 && movimientos.length === 0;
+    const faltanIngresos = desde < 4 && !categorias.some(c => c.tipo === 'ingreso');
+    if (sinDatos || faltanIngresos) {
+        const semilla = await cargarCategoriasIniciales();
+        categorias = sinDatos ? semilla : [...categorias, ...semilla.filter(c => c.tipo === 'ingreso')];
+        guardarCategorias();
+    }
+    if (cuentas.length === 0 && movimientos.length === 0) {
+        cuentas = [{ id: generarId(), nombre: 'Efectivo', tipo: 'efectivo', saldoInicial: 0 }];
+        guardarCuentas();
     }
 }
 
@@ -196,10 +247,9 @@ async function cargarIconos() {
 async function cargarCategoriasIniciales() {
     try {
         const data = await cargarJSON('./categorias.json');
-        categorias = data.map(normalizarCategoria).filter(Boolean).map(c => ({ ...c, id: generarId() }));
-        guardarCategorias();
+        return data.map(normalizarCategoria).filter(Boolean).map(c => ({ ...c, id: generarId() }));
     } catch {
-        categorias = [];
+        return [];
     }
 }
 
@@ -211,36 +261,89 @@ function primerIcono() {
     return obtenerGruposIconos()[0]?.iconos[0] ?? '💰';
 }
 
-// ===== Fondo mensual =====
-function obtenerFondoMensual() {
-    return configuracion.fondoMensual;
+// ===== Cuentas =====
+function obtenerCuentas() {
+    return cuentas;
 }
 
-function setearFondoMensual(monto) {
-    configuracion.fondoMensual = Number(monto);
-    guardarConfiguracion();
+function obtenerCuentaPorId(id) {
+    return cuentas.find(c => c.id === String(id));
+}
+
+function datosCuenta({ nombre, tipo, saldoInicial }) {
+    return {
+        nombre: nombre.trim(),
+        tipo: TIPOS_CUENTA[tipo] ? tipo : 'efectivo',
+        saldoInicial: Number(saldoInicial) || 0
+    };
+}
+
+function crearCuenta(datos) {
+    const nueva = { id: generarId(), ...datosCuenta(datos) };
+    cuentas.push(nueva);
+    guardarCuentas();
+    return nueva;
+}
+
+function editarCuenta(id, datos) {
+    const cuenta = obtenerCuentaPorId(id);
+    if (!cuenta) return null;
+    Object.assign(cuenta, datosCuenta(datos));
+    guardarCuentas();
+    return cuenta;
+}
+
+function contarMovimientosDeCuenta(id) {
+    const clave = String(id);
+    return movimientos.filter(m => m.cuentaId === clave || m.cuentaDestinoId === clave).length;
+}
+
+// Una cuenta con movimientos no se elimina: borrarla cambiaría el saldo total
+// y dejaría transferencias sin origen o destino.
+function eliminarCuenta(id) {
+    if (contarMovimientosDeCuenta(id) > 0) return false;
+    cuentas = cuentas.filter(c => c.id !== String(id));
+    guardarCuentas();
+    return true;
+}
+
+function calcularSaldoCuenta(cuenta) {
+    return movimientos.reduce((saldo, m) => {
+        if (m.cuentaId === cuenta.id) saldo += m.tipo === 'ingreso' ? m.monto : -m.monto;
+        if (m.tipo === 'transferencia' && m.cuentaDestinoId === cuenta.id) saldo += m.monto;
+        return saldo;
+    }, cuenta.saldoInicial);
+}
+
+function obtenerCuentasConSaldo() {
+    return cuentas.map(c => ({ ...c, saldo: calcularSaldoCuenta(c) }));
+}
+
+function calcularSaldoTotal() {
+    return obtenerCuentasConSaldo().reduce((acc, c) => acc + c.saldo, 0);
 }
 
 // ===== Categorías =====
-function obtenerCategorias() {
-    return categorias;
+function obtenerCategorias(tipo) {
+    return tipo ? categorias.filter(c => c.tipo === tipo) : categorias;
 }
 
 function obtenerCategoriaPorId(id) {
     return categorias.find(c => c.id === String(id));
 }
 
-function crearCategoria({ nombre, icono, presupuesto }) {
-    const nueva = { id: generarId(), nombre: nombre.trim(), icono, presupuesto: Number(presupuesto) };
+function crearCategoria({ nombre, icono, presupuesto, tipo }) {
+    const nueva = normalizarCategoria({ id: generarId(), nombre, icono, presupuesto, tipo });
     categorias.push(nueva);
     guardarCategorias();
     return nueva;
 }
 
+// El tipo de una categoría no cambia al editarla: sus movimientos ya son de ese tipo.
 function editarCategoria(id, { nombre, icono, presupuesto }) {
     const cat = obtenerCategoriaPorId(id);
     if (!cat) return null;
-    Object.assign(cat, { nombre: nombre.trim(), icono, presupuesto: Number(presupuesto) });
+    Object.assign(cat, normalizarCategoria({ ...cat, nombre, icono, presupuesto }));
     guardarCategorias();
     return cat;
 }
@@ -260,21 +363,25 @@ function ordenarMovimientos(lista) {
     return [...lista].sort((a, b) => b.fecha.localeCompare(a.fecha) || b.creado - a.creado);
 }
 
-function obtenerMovimientos() {
-    return ordenarMovimientos(movimientos);
+function obtenerMovimientos(periodo) {
+    return ordenarMovimientos(periodo ? movimientosDelPeriodo(periodo) : movimientos);
 }
 
 function obtenerMovimientoPorId(id) {
     return movimientos.find(m => m.id === String(id));
 }
 
-function datosMovimiento({ descripcion, monto, categoriaId, tipo, fecha }) {
+function datosMovimiento({ descripcion, monto, tipo, fecha, cuentaId, cuentaDestinoId, categoriaId }) {
+    const esTransferencia = tipo === 'transferencia';
+    const cat = !esTransferencia && categoriaId ? obtenerCategoriaPorId(categoriaId) : null;
     return {
-        descripcion: descripcion.trim(),
+        descripcion: descripcion.trim() || (esTransferencia ? 'Transferencia' : ''),
         monto: Number(monto),
-        categoriaId: tipo === 'gasto' && categoriaId ? String(categoriaId) : null,
         tipo,
-        fecha
+        fecha,
+        cuentaId: String(cuentaId),
+        cuentaDestinoId: esTransferencia ? String(cuentaDestinoId) : null,
+        categoriaId: cat && cat.tipo === tipo ? cat.id : null
     };
 }
 
@@ -298,73 +405,80 @@ function eliminarMovimiento(id) {
     guardarMovimientos();
 }
 
-function buscarYFiltrar(texto, tipo) {
+function buscarYFiltrar(texto, tipo, periodo) {
     const q = texto.trim().toLowerCase();
-    return obtenerMovimientos().filter(m =>
+    return obtenerMovimientos(periodo).filter(m =>
         (tipo === 'todos' || m.tipo === tipo) &&
         (!q || m.descripcion.toLowerCase().includes(q))
     );
 }
 
 // ===== Cálculos del período =====
-function movimientosDelPeriodo(periodo = periodoActual()) {
+// Las transferencias mueven dinero entre cuentas propias: no son ingreso ni gasto.
+function movimientosDelPeriodo(periodo) {
     return movimientos.filter(m => m.fecha.startsWith(periodo));
 }
 
 const sumar = lista => lista.reduce((acc, m) => acc + m.monto, 0);
 
-// Modelo: el dinero del mes es el fondo más los ingresos del mes.
-// El saldo es lo que queda de eso, y el % utilizado se mide sobre ese mismo total.
-function calcularResumen(periodo = periodoActual()) {
-    const movs = movimientosDelPeriodo(periodo);
-    const ingresos = sumar(movs.filter(m => m.tipo === 'ingreso'));
-    const gastos = sumar(movs.filter(m => m.tipo === 'gasto'));
-    const fondo = configuracion.fondoMensual;
-    const disponibleTotal = fondo + ingresos;
+function totalPorTipo(periodo, tipo) {
+    return sumar(movimientosDelPeriodo(periodo).filter(m => m.tipo === tipo));
+}
+
+function calcularResumen(periodo) {
+    const ingresos = totalPorTipo(periodo, 'ingreso');
+    const gastos = totalPorTipo(periodo, 'gasto');
+    const presupuesto = obtenerCategorias('gasto').reduce((acc, c) => acc + c.presupuesto, 0);
     return {
-        fondo,
         ingresos,
         gastos,
-        disponibleTotal,
-        saldo: disponibleTotal - gastos,
-        porcentajeUtilizado: disponibleTotal > 0 ? (gastos / disponibleTotal) * 100 : 0,
-        cantidad: movs.length
+        resultado: ingresos - gastos,
+        presupuesto,
+        porcentajePresupuesto: presupuesto > 0 ? (gastos / presupuesto) * 100 : 0,
+        cantidad: movimientosDelPeriodo(periodo).length
     };
 }
 
-function calcularPromedioDiario(periodo = periodoActual()) {
+function calcularPromedioDiario(periodo) {
     const dias = periodo === periodoActual() ? new Date().getDate() : diasDelPeriodo(periodo);
-    return calcularResumen(periodo).gastos / dias;
+    return Math.round(totalPorTipo(periodo, 'gasto') / dias);
 }
 
-// Gasto por categoría en el período. La clave null agrupa los gastos sin categoría.
-function calcularGastoPorCategoria(periodo = periodoActual()) {
-    const gasto = new Map();
+// Variación porcentual de los gastos contra el mes anterior (null si no hay base).
+function calcularVariacionGastos(periodo) {
+    const anterior = totalPorTipo(desplazarPeriodo(periodo, -1), 'gasto');
+    if (anterior === 0) return null;
+    return ((totalPorTipo(periodo, 'gasto') - anterior) / anterior) * 100;
+}
+
+// Monto por categoría en el período. La clave null agrupa lo que no tiene categoría.
+function calcularMontoPorCategoria(tipo, periodo) {
+    const montos = new Map();
     movimientosDelPeriodo(periodo)
-        .filter(m => m.tipo === 'gasto')
+        .filter(m => m.tipo === tipo)
         .forEach(m => {
             const clave = m.categoriaId && obtenerCategoriaPorId(m.categoriaId) ? m.categoriaId : null;
-            gasto.set(clave, (gasto.get(clave) ?? 0) + m.monto);
+            montos.set(clave, (montos.get(clave) ?? 0) + m.monto);
         });
-    return gasto;
+    return montos;
 }
 
-function obtenerCategoriasConGasto(periodo = periodoActual()) {
-    const gasto = calcularGastoPorCategoria(periodo);
-    return categorias.map(c => ({ ...c, gastado: gasto.get(c.id) ?? 0 }));
+function obtenerCategoriasConMonto(tipo, periodo) {
+    const montos = calcularMontoPorCategoria(tipo, periodo);
+    return obtenerCategorias(tipo).map(c => ({ ...c, monto: montos.get(c.id) ?? 0 }));
 }
 
-function obtenerCategoriaMasGastada(periodo = periodoActual()) {
-    return obtenerCategoriasConGasto(periodo)
-        .filter(c => c.gastado > 0)
-        .reduce((top, c) => (!top || c.gastado > top.gastado ? c : top), null);
+function obtenerCategoriaMasGastada(periodo) {
+    return obtenerCategoriasConMonto('gasto', periodo)
+        .filter(c => c.monto > 0)
+        .reduce((top, c) => (!top || c.monto > top.monto ? c : top), null);
 }
 
-function obtenerDatosGrafico(periodo = periodoActual()) {
-    const datos = obtenerCategoriasConGasto(periodo)
-        .filter(c => c.gastado > 0)
-        .map(c => ({ etiqueta: `${c.icono} ${c.nombre}`, valor: c.gastado, sinCategoria: false }));
-    const sinCategoria = calcularGastoPorCategoria(periodo).get(null);
+function obtenerDatosGrafico(periodo) {
+    const datos = obtenerCategoriasConMonto('gasto', periodo)
+        .filter(c => c.monto > 0)
+        .map(c => ({ etiqueta: `${c.icono} ${c.nombre}`, valor: c.monto, sinCategoria: false }));
+    const sinCategoria = calcularMontoPorCategoria('gasto', periodo).get(null);
     if (sinCategoria) datos.push({ etiqueta: 'Sin categoría', valor: sinCategoria, sinCategoria: true });
     return datos;
 }
@@ -389,14 +503,16 @@ function formatearFecha(fechaISO) {
 }
 
 export {
+    TIPOS_CUENTA,
     inicializarDatos,
     obtenerGruposIconos, primerIcono,
-    obtenerFondoMensual, setearFondoMensual,
+    obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
+    contarMovimientosDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
     obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria,
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
     buscarYFiltrar,
-    periodoActual, nombrePeriodo, fechaHoy, esFechaISO,
-    calcularResumen, calcularPromedioDiario, obtenerCategoriasConGasto, obtenerCategoriaMasGastada,
-    obtenerDatosGrafico,
+    periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
+    calcularResumen, calcularPromedioDiario, calcularVariacionGastos,
+    obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
     formatearMoneda, formatearFecha
 };

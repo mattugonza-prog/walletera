@@ -194,16 +194,16 @@ ul { list-style: none; }
     top: 0;
     z-index: 30;
 }
-.nav-contenido { display: grid; grid-template-columns: repeat(4, 1fr); }
+.nav-contenido { display: grid; grid-template-columns: repeat(5, 1fr); }
 .nav-btn {
     position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 5px;
-    padding: 11px 4px 12px;
+    padding: 11px 2px 12px;
     color: var(--tinta-suave);
-    font-size: 0.74rem;
+    font-size: 0.7rem;
     font-weight: 700;
     transition: color var(--vel-rapida) ease;
 }
@@ -239,6 +239,37 @@ ul { list-style: none; }
 }
 .seccion-descripcion { color: var(--tinta-suave); font-size: 0.9rem; }
 
+/* ===== Selector de período ===== */
+.selector-periodo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+.selector-periodo[hidden] { display: none; }
+.periodo-nombre {
+    min-width: 11ch;
+    text-align: center;
+    font-weight: 800;
+    font-size: 0.95rem;
+    letter-spacing: -0.01em;
+}
+.periodo-nombre::first-letter { text-transform: uppercase; }
+.periodo-btn {
+    width: 36px; height: 36px;
+    display: grid; place-items: center;
+    border-radius: var(--pill);
+    background: var(--superficie);
+    border: 1px solid var(--borde);
+    color: var(--tinta-media);
+    transition: background var(--vel-rapida) ease, transform var(--vel-tap) var(--salida), opacity var(--vel-rapida) ease;
+}
+.periodo-btn i { font-size: 16px; line-height: 1; }
+.periodo-btn:active:not(:disabled) { transform: scale(0.92); }
+.periodo-btn:disabled { opacity: 0.4; cursor: default; }
+@media (hover: hover) { .periodo-btn:hover:not(:disabled) { background: var(--superficie-2); } }
+
 /* ===== Tarjeta de saldo ===== */
 .tarjeta-saldo {
     position: relative;
@@ -260,7 +291,9 @@ ul { list-style: none; }
     pointer-events: none;
 }
 .tarjeta-saldo-label { font-size: 0.85rem; opacity: 0.88; font-weight: 600; }
-#periodoSaldo::first-letter { text-transform: uppercase; }
+.tarjeta-saldo-sub { display: block; font-size: 0.8rem; opacity: 0.8; font-weight: 600; margin: -16px 0 18px; }
+.acciones-rapidas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.acciones-rapidas .btn { padding: 11px 8px; font-size: 0.88rem; }
 .tarjeta-saldo-monto {
     font-size: 2.4rem;
     font-weight: 800;
@@ -315,6 +348,7 @@ ul { list-style: none; }
 .card-label { display: block; color: var(--tinta-suave); font-size: 0.78rem; font-weight: 700; }
 .card-valor { font-size: 1.4rem; font-weight: 800; margin-top: 4px; letter-spacing: -0.02em; }
 .grid-mini, .grid-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+.grid-mini > :last-child:nth-child(odd) { grid-column: span 2; }
 
 /* ===== Bloques ===== */
 .bloque {
@@ -411,6 +445,7 @@ ul { list-style: none; }
 .movimiento-monto { font-weight: 800; font-size: 1rem; white-space: nowrap; }
 .movimiento-ingreso .movimiento-monto { color: var(--ok); }
 .movimiento-gasto .movimiento-monto { color: var(--peligro); }
+.movimiento-monto.negativo, .categoria-mini-monto.negativo { color: var(--peligro); }
 .movimiento-acciones { display: flex; gap: 6px; }
 .movimiento-accion {
     width: 32px; height: 32px;
@@ -508,7 +543,7 @@ ul { list-style: none; }
 
 /* Control segmentado (filtros) */
 .filtros {
-    display: grid; grid-template-columns: repeat(3, 1fr);
+    display: flex;
     gap: 4px; padding: 4px;
     background: var(--superficie-2);
     border: 1px solid var(--borde-suave);
@@ -516,10 +551,12 @@ ul { list-style: none; }
     margin-bottom: 16px;
 }
 .filtro-btn {
-    padding: 9px 12px;
+    flex: 1 1 auto;
+    padding: 9px 10px;
+    white-space: nowrap;
     border-radius: var(--radio-sm);
     color: var(--tinta-suave);
-    font-weight: 700; font-size: 0.85rem;
+    font-weight: 700; font-size: 0.82rem;
     transition: color var(--vel-rapida) ease, background var(--vel-rapida) ease, box-shadow var(--vel-rapida) ease, transform var(--vel-tap) var(--salida);
 }
 .filtro-btn:active { transform: scale(0.97); }
@@ -599,6 +636,7 @@ ul { list-style: none; }
 .campo { display: flex; flex-direction: column; gap: 7px; }
 .campo[hidden] { display: none; }
 .campo > span { font-size: 0.82rem; font-weight: 700; color: var(--tinta-media); }
+.campo-ayuda { font-size: 0.76rem; color: var(--tinta-suave); line-height: 1.4; }
 .campo input, .campo select {
     padding: 12px 14px;
     border: 1px solid var(--borde);
@@ -661,21 +699,22 @@ ul { list-style: none; }
 
 /* Toggle tipo de movimiento */
 .toggle-tipo {
-    display: grid; grid-template-columns: 1fr 1fr;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     background: var(--superficie-2);
     border: 1px solid var(--borde-suave);
     padding: 4px; border-radius: var(--radio-md); gap: 4px;
 }
 .toggle-btn {
-    padding: 10px;
+    padding: 10px 4px;
     border-radius: var(--radio-sm);
-    font-weight: 800; font-size: 0.9rem;
+    font-weight: 800; font-size: 0.85rem;
     color: var(--tinta-suave);
     transition: color var(--vel-rapida) ease, background var(--vel-rapida) ease, box-shadow var(--vel-rapida) ease, transform var(--vel-tap) var(--salida);
 }
 .toggle-btn:active { transform: scale(0.97); }
 .toggle-btn[data-tipo="gasto"].activa   { background: var(--superficie); color: var(--peligro); box-shadow: var(--sombra); }
 .toggle-btn[data-tipo="ingreso"].activa { background: var(--superficie); color: var(--ok); box-shadow: var(--sombra); }
+.toggle-btn[data-tipo="transferencia"].activa { background: var(--superficie); color: var(--marca); box-shadow: var(--sombra); }
 
 /* ===== Canvas Chart.js ===== */
 .canvas-contenedor { position: relative; width: 100%; height: 280px; }
@@ -714,6 +753,8 @@ ul { list-style: none; }
     .contenedor { max-width: 900px; }
     .nav-btn { flex-direction: row; justify-content: center; gap: 8px; padding: 16px 8px; font-size: 0.9rem; white-space: nowrap; }
     .grid-mini, .grid-stats { grid-template-columns: repeat(3, 1fr); }
+    .grid-mini > :last-child:nth-child(odd) { grid-column: auto; }
+    .nav-btn { font-size: 0.86rem; gap: 6px; }
     .modal { align-items: center; }
     .modal-caja {
         border-radius: var(--radio);
@@ -731,7 +772,7 @@ ul { list-style: none; }
 /* ===== Desktop (1024px+) ===== */
 @media (min-width: 1024px) {
     .contenedor { max-width: 1100px; }
-    .grid-stats { grid-template-columns: repeat(5, 1fr); }
+    .nav-btn { font-size: 0.9rem; gap: 8px; }
     .lista-categorias { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .tarjeta-saldo-monto { font-size: 2.9rem; }
 }

@@ -10,6 +10,8 @@
     <meta property="og:type" content="website">
     <title>Walletera</title>
     <link rel="icon" type="image/svg+xml" href="./img/favicon.svg">
+    <link rel="apple-touch-icon" href="./img/icono-180.png">
+    <link rel="manifest" href="./manifest.webmanifest">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap">
@@ -41,6 +43,7 @@
             <button class="nav-item" type="button" data-seccion="cuentas"><i class="ph ph-wallet" aria-hidden="true"></i>Cuentas</button>
             <button class="nav-item" type="button" data-seccion="presupuestos"><i class="ph ph-target" aria-hidden="true"></i>Presupuestos</button>
             <button class="nav-item" type="button" data-seccion="analisis"><i class="ph ph-chart-pie-slice" aria-hidden="true"></i>Análisis</button>
+            <button class="nav-item" type="button" data-seccion="ajustes"><i class="ph ph-gear-six" aria-hidden="true"></i>Ajustes</button>
         </nav>
         <button class="nav-item lateral-tema" type="button" data-alternar-tema>
             <i class="ph ph-sun icono-tema-claro" aria-hidden="true"></i><i class="ph ph-moon icono-tema-oscuro" aria-hidden="true"></i>
@@ -59,9 +62,14 @@
                         <span class="saludo-fecha" id="fechaHoy"></span>
                     </div>
                 </div>
-                <button class="btn-icono solo-movil" type="button" data-alternar-tema aria-label="Cambiar tema">
-                    <i class="ph ph-sun icono-tema-claro" aria-hidden="true"></i><i class="ph ph-moon icono-tema-oscuro" aria-hidden="true"></i>
-                </button>
+                <div class="saludo-acciones solo-movil">
+                    <button class="btn-icono" type="button" data-alternar-tema aria-label="Cambiar tema">
+                        <i class="ph ph-sun icono-tema-claro" aria-hidden="true"></i><i class="ph ph-moon icono-tema-oscuro" aria-hidden="true"></i>
+                    </button>
+                    <button class="btn-icono" type="button" data-seccion="ajustes" aria-label="Ajustes">
+                        <i class="ph ph-gear-six" aria-hidden="true"></i>
+                    </button>
+                </div>
             </header>
 
             <div class="inicio-grid">
@@ -214,6 +222,69 @@
                     <canvas id="graficoCategorias" role="img" aria-label="Gráfico de gastos por categoría"></canvas>
                 </div>
             </section>
+            <section class="tarjeta" aria-labelledby="tituloGraficoMensual">
+                <h2 id="tituloGraficoMensual">Ingresos y gastos · últimos 6 meses</h2>
+                <div class="grafico">
+                    <canvas id="graficoMensual" role="img" aria-label="Gráfico de barras de ingresos y gastos de los últimos seis meses"></canvas>
+                </div>
+            </section>
+        </section>
+
+        <!-- ===== Ajustes ===== -->
+        <section class="seccion" id="ajustes" aria-labelledby="tituloAjustes">
+            <header class="encabezado">
+                <h1 id="tituloAjustes">Ajustes</h1>
+            </header>
+            <section class="ajustes-grupo" aria-labelledby="tituloApariencia">
+                <h2 class="ajustes-titulo" id="tituloApariencia">Apariencia</h2>
+                <ul class="lista tarjeta">
+                    <li>
+                        <button class="fila" type="button" data-alternar-tema>
+                            <span class="icono-tile tono-gris"><i class="ph ph-sun icono-tema-claro" aria-hidden="true"></i><i class="ph ph-moon icono-tema-oscuro" aria-hidden="true"></i></span>
+                            <span class="fila-texto"><span class="fila-nombre">Tema</span><span class="fila-meta">Oscuro o claro</span></span>
+                            <span class="fila-meta texto-tema"></span>
+                        </button>
+                    </li>
+                </ul>
+            </section>
+            <section class="ajustes-grupo" aria-labelledby="tituloDatos">
+                <h2 class="ajustes-titulo" id="tituloDatos">Tus datos</h2>
+                <p class="texto-suave">Walletera guarda todo en este navegador: nada sale de tu dispositivo. Descargá un respaldo de vez en cuando.</p>
+                <ul class="lista tarjeta">
+                    <li>
+                        <button class="fila" type="button" data-cargar-ejemplo>
+                            <span class="icono-tile tono-verde"><i class="ph ph-sparkle" aria-hidden="true"></i></span>
+                            <span class="fila-texto"><span class="fila-nombre">Cargar datos de ejemplo</span><span class="fila-meta">Tres meses de movimientos para explorar la app</span></span>
+                        </button>
+                    </li>
+                    <li>
+                        <button class="fila" type="button" id="btnExportarCSV">
+                            <span class="icono-tile tono-azul"><i class="ph ph-file-csv" aria-hidden="true"></i></span>
+                            <span class="fila-texto"><span class="fila-nombre">Exportar movimientos</span><span class="fila-meta">CSV para Excel o Google Sheets</span></span>
+                        </button>
+                    </li>
+                    <li>
+                        <button class="fila" type="button" id="btnDescargarRespaldo">
+                            <span class="icono-tile tono-violeta"><i class="ph ph-download-simple" aria-hidden="true"></i></span>
+                            <span class="fila-texto"><span class="fila-nombre">Descargar respaldo</span><span class="fila-meta">Un archivo JSON con todos tus datos</span></span>
+                        </button>
+                    </li>
+                    <li>
+                        <button class="fila" type="button" id="btnRestaurarRespaldo">
+                            <span class="icono-tile tono-turquesa"><i class="ph ph-upload-simple" aria-hidden="true"></i></span>
+                            <span class="fila-texto"><span class="fila-nombre">Restaurar respaldo</span><span class="fila-meta">Reemplaza los datos actuales</span></span>
+                        </button>
+                    </li>
+                    <li>
+                        <button class="fila" type="button" id="btnBorrarTodo">
+                            <span class="icono-tile tono-rosa"><i class="ph ph-trash" aria-hidden="true"></i></span>
+                            <span class="fila-texto"><span class="fila-nombre negativo">Borrar todos los datos</span><span class="fila-meta">Vuelve a empezar de cero</span></span>
+                        </button>
+                    </li>
+                </ul>
+                <input type="file" id="archivoRespaldo" accept="application/json,.json" hidden>
+            </section>
+            <p class="acerca texto-suave">Walletera · <a href="https://github.com/mattugonza-prog/walletera" target="_blank" rel="noopener">Código fuente en GitHub</a></p>
         </section>
     </main>
 

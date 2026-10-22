@@ -150,7 +150,7 @@ h2 { font-size: 17px; }
 }
 
 .lateral { display: none; }
-.solo-movil { display: grid; }
+.solo-movil { display: flex; }
 
 .seccion { display: none; flex-direction: column; gap: 18px; }
 .seccion.activa { display: flex; animation: aparecer var(--media) var(--salida); }
@@ -392,6 +392,14 @@ h2 { font-size: 17px; }
 }
 @keyframes brillar { to { transform: translateX(100%); } }
 
+/* ===== Ajustes ===== */
+.saludo-acciones { display: flex; gap: 8px; }
+.ajustes-grupo { display: flex; flex-direction: column; gap: 10px; }
+.ajustes-titulo { font-size: 13px; font-weight: 500; color: var(--tinta-suave); letter-spacing: 0; }
+.acerca { text-align: center; padding: 8px 0; }
+.acerca a { color: var(--acento-tinta); text-underline-offset: 3px; }
+.vacio .btn { margin-top: 10px; }
+
 /* ===== Análisis ===== */
 .grid-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .grafico { position: relative; height: 300px; margin-top: 12px; }
@@ -594,7 +602,7 @@ h2 { font-size: 17px; }
 
     .principal { max-width: 1120px; padding: 32px 40px 48px; }
     .seccion { gap: 20px; }
-    #movimientos, #cuentas, #presupuestos { max-width: 720px; }
+    #movimientos, #cuentas, #presupuestos, #ajustes { max-width: 720px; }
 
     .inicio-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; align-items: start; }
     .saludo h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }

@@ -10,9 +10,11 @@ import {
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
     buscarYFiltrar, agruparPorDia,
     periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
-    calcularResumen, calcularPromedioDiario, calcularVariacionGastos,
+    calcularResumen, calcularPromedioDiario, calcularVariacionGastos, calcularSerieMensual,
     obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
-    formatearMoneda, etiquetaDia
+    formatearMoneda, etiquetaDia,
+    validarRespaldo, reemplazarDatos, exportarRespaldo, exportarCSV,
+    cargarDatosDeEjemplo, reiniciarDatos, hayMovimientos
 } from './js/datos.js';
 
 // ===== Estado de UI =====
@@ -21,6 +23,7 @@ let filtroActual = 'todos';
 let busquedaActual = '';
 let tipoCategoriaActual = 'gasto';
 let graficoCategorias = null;
+let graficoMensual = null;
 let resolverConfirmacion = null;
 const modalesAbiertos = [];
 
@@ -55,7 +58,16 @@ async function iniciar() {
     configurarFormularioCuenta();
     configurarFormularioCategoria();
     configurarBuscadorYFiltros();
+    configurarAjustes();
     renderizarTodo();
+    registrarServiceWorker();
+}
+
+// Permite usar la app sin conexión e instalarla (PWA).
+function registrarServiceWorker() {
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+        navigator.serviceWorker.register('./sw.js').catch(() => { /* la app funciona igual sin él */ });
+    }
 }
 
 function renderizarTodo() {
@@ -65,12 +77,12 @@ function renderizarTodo() {
     renderizarCuentas();
     renderizarPresupuestos();
     renderizarAnalisis();
-    if ($('analisis').classList.contains('activa')) renderizarGrafico();
+    if ($('analisis').classList.contains('activa')) renderizarGraficos();
 }
 
 // ===== Formato =====
 const formatearPorcentaje = valor =>
-    `${valor.toLocaleString('es-AR', { maximumFractionDigits: 1 })} %`;
+    `${valor.toLocaleString('es-AR', { maximumFractionDigits: 1 }).replace('-', '−')} %`;
 
 function formatearConSigno(monto) {
     if (monto > 0) return `+\u00a0${formatearMoneda(monto)}`;
@@ -92,7 +104,7 @@ function aplicarTema(tema) {
     $('metaThemeColor')?.setAttribute('content', COLOR_META[valor]);
     document.querySelectorAll('[data-alternar-tema]').forEach(btn => btn.setAttribute('aria-label', `Cambiar a modo ${otro}`));
     document.querySelectorAll('.texto-tema').forEach(el => { el.textContent = `Modo ${otro}`; });
-    if (graficoCategorias) renderizarGrafico();
+    if (graficoCategorias || graficoMensual) renderizarGraficos();
 }
 
 function configurarPrivacidad() {
@@ -114,7 +126,7 @@ function configurarPrivacidad() {
 // Botones que se crean al renderizar también navegan, abren modales o editan.
 function configurarClicsGlobales() {
     document.addEventListener('click', e => {
-        const objetivo = e.target.closest('[data-seccion], [data-nuevo-movimiento], [data-alternar-tema], [data-periodo], [data-editar-movimiento], [data-editar-cuenta], [data-editar-categoria]');
+        const objetivo = e.target.closest('[data-seccion], [data-nuevo-movimiento], [data-alternar-tema], [data-periodo], [data-editar-movimiento], [data-editar-cuenta], [data-editar-categoria], [data-cargar-ejemplo]');
         if (!objetivo) return;
         const d = objetivo.dataset;
         if (d.seccion) irASeccion(d.seccion);
@@ -124,6 +136,7 @@ function configurarClicsGlobales() {
         else if (d.editarMovimiento) abrirModalMovimiento(d.editarMovimiento);
         else if (d.editarCuenta) abrirModalCuenta(d.editarCuenta);
         else if (d.editarCategoria) abrirModalCategoria(d.editarCategoria);
+        else if ('cargarEjemplo' in d) cargarEjemplo();
     });
 }
 
@@ -137,7 +150,7 @@ function irASeccion(idSeccion) {
         else b.removeAttribute('aria-current');
     });
     window.scrollTo({ top: 0 });
-    if (idSeccion === 'analisis') renderizarGrafico();
+    if (idSeccion === 'analisis') renderizarGraficos();
 }
 
 // ===== Período =====
@@ -162,11 +175,12 @@ function mostrarSkeletons() {
     ['resumenPresupuestos', 'listaCuentas', 'listaCategorias'].forEach(id => { $(id).innerHTML = filas(3); });
 }
 
-function htmlVacio(icono, titulo, sub, etiqueta = 'div') {
+function htmlVacio(icono, titulo, sub, etiqueta = 'div', extra = '') {
     return `<${etiqueta} class="vacio">
         <i class="ph ${icono}" aria-hidden="true"></i>
         <strong>${titulo}</strong>
         ${sub ? `<span>${sub}</span>` : ''}
+        ${extra}
     </${etiqueta}>`;
 }
 
@@ -176,7 +190,7 @@ const tile = (icono, color) =>
 const nombreCuenta = id => esc(obtenerCuentaPorId(id)?.nombre ?? 'Cuenta eliminada');
 
 function filaMovimiento(m) {
-    let icono, color, meta, monto, claseMonto = '';
+    let icono, color, meta, monto, claseMonto;
     if (m.tipo === 'transferencia') {
         [icono, color] = ['ph-arrows-left-right', 'gris'];
         meta = `${nombreCuenta(m.cuentaId)} → ${nombreCuenta(m.cuentaDestinoId)}`;
@@ -290,9 +304,13 @@ function renderizarInicio() {
     $('gastosMes').textContent = formatearMoneda(resumen.gastos);
 
     const ultimos = obtenerMovimientos(periodo).slice(0, 6);
+    // Sin ningún movimiento todavía, se ofrece cargar datos de ejemplo para explorar.
     $('ultimosMovimientos').innerHTML = ultimos.length
         ? htmlGrupos(ultimos)
-        : htmlVacio('ph-tray', `Sin movimientos en ${mes}`, 'Tocá + para registrar el primero.');
+        : hayMovimientos()
+            ? htmlVacio('ph-tray', `Sin movimientos en ${mes}`, 'Tocá + para registrar uno.')
+            : htmlVacio('ph-tray', 'Todavía no hay movimientos', 'Registrá el primero con + o explorá la app con datos de ejemplo.', 'div',
+                '<button class="btn btn-secundario" type="button" data-cargar-ejemplo><i class="ph ph-sparkle" aria-hidden="true"></i> Cargar datos de ejemplo</button>');
 
     const conPresupuesto = obtenerCategoriasConMonto('gasto', periodo)
         .filter(c => c.presupuesto > 0)
@@ -412,6 +430,58 @@ function renderizarAnalisis() {
     $('statPresupuesto').textContent   = resumen.presupuesto > 0 ? formatearPorcentaje(resumen.porcentajePresupuesto) : '—';
     $('statVariacion').textContent     = variacion === null ? '—' : `${variacion > 0 ? '+' : ''}${formatearPorcentaje(variacion)}`;
     $('statCategoriaTop').textContent  = top ? top.nombre : '—';
+}
+
+function renderizarGraficos() {
+    renderizarGrafico();
+    renderizarGraficoMensual();
+}
+
+function renderizarGraficoMensual() {
+    const ctx = $('graficoMensual');
+    if (!ctx || typeof Chart === 'undefined') return;
+    const serie = calcularSerieMensual(periodo, 6);
+    const estilos = getComputedStyle(document.documentElement);
+    const token = nombre => estilos.getPropertyValue(nombre).trim();
+    const compacto = new Intl.NumberFormat('es-AR', { notation: 'compact', maximumFractionDigits: 1 });
+    const etiqueta = p => {
+        const [a, m] = p.split('-').map(Number);
+        const texto = new Date(a, m - 1, 1).toLocaleDateString('es-AR', { month: 'short' }).replace('.', '');
+        return texto.charAt(0).toUpperCase() + texto.slice(1);
+    };
+
+    graficoMensual?.destroy();
+    graficoMensual = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: serie.map(s => etiqueta(s.periodo)),
+            datasets: [
+                { label: 'Ingresos', data: serie.map(s => s.ingresos), backgroundColor: token('--barra-ok'), borderRadius: 6, maxBarThickness: 22 },
+                { label: 'Gastos', data: serie.map(s => s.gastos), backgroundColor: token('--tinta-suave'), borderRadius: 6, maxBarThickness: 22 }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 500 },
+            scales: {
+                x: { grid: { display: false }, border: { display: false }, ticks: { color: token('--tinta-suave'), font: { family: FUENTE } } },
+                y: {
+                    grid: { color: token('--borde') },
+                    border: { display: false },
+                    ticks: { color: token('--tinta-suave'), font: { family: FUENTE }, callback: v => compacto.format(v), maxTicksLimit: 5 }
+                }
+            },
+            plugins: {
+                legend: { position: 'bottom', labels: { color: token('--tinta-suave'), usePointStyle: true, pointStyle: 'circle', padding: 14, font: { family: FUENTE, size: 13 } } },
+                tooltip: {
+                    padding: 12, cornerRadius: 10,
+                    titleFont: { family: FUENTE, weight: '600' }, bodyFont: { family: FUENTE },
+                    callbacks: { label: c => ` ${c.dataset.label}: ${formatearMoneda(c.parsed.y)}` }
+                }
+            }
+        }
+    });
 }
 
 function renderizarGrafico() {
@@ -851,5 +921,81 @@ function configurarFormularioCategoria() {
         cerrarModal('modalCategoria');
         mostrarToast('Categoría eliminada');
         renderizarTodo();
+    });
+}
+
+// ===== Ajustes: datos de ejemplo, exportación y respaldo =====
+function descargar(nombre, contenido, tipo) {
+    const url = URL.createObjectURL(new Blob([contenido], { type: tipo }));
+    const enlace = Object.assign(document.createElement('a'), { href: url, download: nombre });
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function cargarEjemplo() {
+    if (hayMovimientos()) {
+        const ok = await confirmar({
+            titulo: '¿Reemplazar tus datos?',
+            texto: 'Los datos de ejemplo reemplazan tus cuentas, categorías y movimientos actuales.',
+            aceptar: 'Reemplazar',
+            peligro: true
+        });
+        if (!ok) return;
+    }
+    await cargarDatosDeEjemplo();
+    periodo = periodoActual();
+    renderizarTodo();
+    irASeccion('inicio');
+    mostrarToast('Datos de ejemplo cargados');
+}
+
+function configurarAjustes() {
+    $('btnExportarCSV').addEventListener('click', () => {
+        if (!hayMovimientos()) return mostrarToast('Todavía no hay movimientos para exportar', 'alerta');
+        // El BOM hace que Excel reconozca los acentos.
+        descargar(`walletera-movimientos-${fechaHoy()}.csv`, `\ufeff${exportarCSV()}`, 'text/csv;charset=utf-8');
+    });
+    $('btnDescargarRespaldo').addEventListener('click', () => {
+        descargar(`walletera-respaldo-${fechaHoy()}.json`, JSON.stringify(exportarRespaldo(), null, 2), 'application/json');
+        mostrarToast('Respaldo descargado');
+    });
+    $('btnRestaurarRespaldo').addEventListener('click', () => $('archivoRespaldo').click());
+    $('archivoRespaldo').addEventListener('change', async e => {
+        const archivo = e.target.files[0];
+        e.target.value = '';
+        if (!archivo) return;
+        let datos;
+        try {
+            datos = validarRespaldo(JSON.parse(await archivo.text()));
+        } catch (error) {
+            return mostrarToast(error instanceof SyntaxError ? 'El archivo no es un JSON válido' : error.message, 'alerta');
+        }
+        const resumen = `${datos.cuentas.length} cuentas, ${datos.categorias.length} categorías y ${datos.movimientos.length} movimientos`;
+        const ok = await confirmar({
+            titulo: '¿Restaurar este respaldo?',
+            texto: `Se cargan ${resumen}${datos.descartados ? ` (${datos.descartados} movimientos inválidos se omiten)` : ''}. Tus datos actuales se reemplazan.`,
+            aceptar: 'Restaurar',
+            peligro: true
+        });
+        if (!ok) return;
+        reemplazarDatos(datos);
+        periodo = periodoActual();
+        renderizarTodo();
+        mostrarToast('Respaldo restaurado');
+    });
+    $('btnBorrarTodo').addEventListener('click', async () => {
+        const ok = await confirmar({
+            titulo: '¿Borrar todos los datos?',
+            texto: 'Se eliminan tus cuentas, categorías y movimientos de este navegador. Si querés conservarlos, descargá un respaldo antes.',
+            aceptar: 'Borrar todo',
+            peligro: true
+        });
+        if (!ok) return;
+        await reiniciarDatos();
+        periodo = periodoActual();
+        renderizarTodo();
+        mostrarToast('Datos borrados');
     });
 }

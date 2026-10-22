@@ -1,5 +1,6 @@
 // ===== Walletera | datos.js =====
 // Capa de datos: estado, persistencia, migraciones y cálculos.
+import { generarDatosDeEjemplo } from './ejemplo.js';
 
 const CLAVES = {
     configuracion: 'walletera_configuracion',
@@ -54,7 +55,6 @@ const EMOJI_A_ICONO = {
 };
 
 // ===== Estado en memoria =====
-let configuracion = {};
 let cuentas       = [];
 let categorias    = [];
 let movimientos   = [];
@@ -200,7 +200,8 @@ function migrarAV4({ categorias: cats, movimientos: movs }, config) {
         cuentasV4.push({ id: generarId(), nombre: 'Cuenta principal', tipo: 'banco', saldoInicial: fondo });
     }
     const principal = cuentasV4[0]?.id ?? null;
-    const { fondoMensual, ...resto } = config;
+    const resto = { ...config };
+    delete resto.fondoMensual;
     return {
         configuracion: resto,
         cuentas: cuentasV4,
@@ -242,7 +243,6 @@ function migrarDatos() {
 // ===== Inicialización =====
 async function inicializarDatos() {
     const { desde } = migrarDatos();
-    configuracion = leer(CLAVES.configuracion, {});
     cuentas       = leer(CLAVES.cuentas, []);
     categorias    = leer(CLAVES.categorias, []);
     movimientos   = leer(CLAVES.movimientos, []);
@@ -283,6 +283,127 @@ async function cargarCategoriasIniciales() {
         return [];
     }
 }
+
+// ===== Respaldo, importación y datos de ejemplo =====
+function normalizarCuenta(c) {
+    if (!c || typeof c.nombre !== 'string' || !c.nombre.trim()) return null;
+    const saldoInicial = Number(c.saldoInicial ?? 0);
+    if (!Number.isFinite(saldoInicial)) return null;
+    return {
+        id: String(c.id ?? generarId()),
+        nombre: c.nombre.trim(),
+        tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'efectivo',
+        saldoInicial
+    };
+}
+
+function normalizarMovimiento(m, idsCuentas, categoriasPorId) {
+    if (!m || typeof m.descripcion !== 'string' || !['gasto', 'ingreso', 'transferencia'].includes(m.tipo)) return null;
+    const monto = Number(m.monto);
+    if (!Number.isFinite(monto) || monto <= 0 || !esFechaISO(m.fecha)) return null;
+    const cuentaId = String(m.cuentaId);
+    if (!idsCuentas.has(cuentaId)) return null;
+    const esTransferencia = m.tipo === 'transferencia';
+    const destino = esTransferencia ? String(m.cuentaDestinoId) : null;
+    if (esTransferencia && (!idsCuentas.has(destino) || destino === cuentaId)) return null;
+    const cat = !esTransferencia && m.categoriaId != null ? categoriasPorId.get(String(m.categoriaId)) : null;
+    return {
+        id: String(m.id ?? generarId()),
+        descripcion: m.descripcion.trim(),
+        monto,
+        tipo: m.tipo,
+        fecha: m.fecha,
+        cuentaId,
+        cuentaDestinoId: destino,
+        categoriaId: cat && cat.tipo === m.tipo ? cat.id : null,
+        creado: Number(m.creado) || 0
+    };
+}
+
+// Valida un respaldo completo. Lanza un Error con un mensaje para el usuario si no sirve;
+// los registros sueltos inválidos se descartan y se informan en "descartados".
+function validarRespaldo(datos) {
+    if (!datos || typeof datos !== 'object' ||
+        !Array.isArray(datos.cuentas) || !Array.isArray(datos.categorias) || !Array.isArray(datos.movimientos)) {
+        throw new Error('El archivo no es un respaldo de Walletera.');
+    }
+    const cuentasValidas = datos.cuentas.map(normalizarCuenta).filter(Boolean);
+    const categoriasValidas = datos.categorias.map(normalizarCategoria).filter(Boolean);
+    const idsCuentas = new Set(cuentasValidas.map(c => c.id));
+    const categoriasPorId = new Map(categoriasValidas.map(c => [c.id, c]));
+    const movimientosValidos = datos.movimientos
+        .map(m => normalizarMovimiento(m, idsCuentas, categoriasPorId))
+        .filter(Boolean);
+    return {
+        cuentas: cuentasValidas,
+        categorias: categoriasValidas,
+        movimientos: movimientosValidos,
+        descartados: datos.movimientos.length - movimientosValidos.length
+    };
+}
+
+function reemplazarDatos(datos) {
+    const validos = validarRespaldo(datos);
+    cuentas = validos.cuentas;
+    categorias = validos.categorias;
+    movimientos = validos.movimientos;
+    guardarCuentas();
+    guardarCategorias();
+    guardarMovimientos();
+    return validos;
+}
+
+function exportarRespaldo() {
+    return {
+        app: 'walletera',
+        version: VERSION_DATOS,
+        exportado: new Date().toISOString(),
+        cuentas,
+        categorias,
+        movimientos
+    };
+}
+
+// CSV con ";" y coma decimal, como lo espera Excel en español.
+// Los textos que empiezan con = + - @ se prefijan para que no se ejecuten como fórmulas.
+function exportarCSV() {
+    const texto = valor => {
+        const t = String(valor ?? '');
+        return /^[=+\-@]/.test(t) ? `'${t}` : t;
+    };
+    const celda = valor => {
+        const t = String(valor);
+        return /[";\r\n]/.test(t) ? `"${t.replaceAll('"', '""')}"` : t;
+    };
+    const tipos = { gasto: 'Gasto', ingreso: 'Ingreso', transferencia: 'Transferencia' };
+    const filas = ordenarMovimientos(movimientos).map(m => [
+        m.fecha,
+        tipos[m.tipo],
+        texto(m.descripcion),
+        (m.tipo === 'gasto' ? -m.monto : m.monto).toFixed(2).replace('.', ','),
+        texto(obtenerCuentaPorId(m.cuentaId)?.nombre),
+        texto(m.cuentaDestinoId ? obtenerCuentaPorId(m.cuentaDestinoId)?.nombre : ''),
+        texto(m.categoriaId ? obtenerCategoriaPorId(m.categoriaId)?.nombre : '')
+    ]);
+    const encabezado = ['Fecha', 'Tipo', 'Descripción', 'Monto', 'Cuenta', 'Cuenta destino', 'Categoría'];
+    return [encabezado, ...filas].map(fila => fila.map(celda).join(';')).join('\r\n');
+}
+
+async function cargarDatosDeEjemplo() {
+    const semilla = await cargarCategoriasIniciales();
+    return reemplazarDatos(generarDatosDeEjemplo(semilla));
+}
+
+// Borra todo (incluidos los respaldos de migración) y vuelve al estado inicial.
+async function reiniciarDatos() {
+    Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
+        .filter(clave => clave.startsWith('walletera_respaldo_'))
+        .forEach(clave => localStorage.removeItem(clave));
+    [CLAVES.cuentas, CLAVES.categorias, CLAVES.movimientos].forEach(clave => localStorage.removeItem(clave));
+    await inicializarDatos();
+}
+
+const hayMovimientos = () => movimientos.length > 0;
 
 function obtenerGruposIconos() {
     return gruposIconos.length ? gruposIconos : GRUPOS_ICONOS_FALLBACK;
@@ -500,6 +621,14 @@ function calcularVariacionGastos(periodo) {
     return ((totalPorTipo(periodo, 'gasto') - anterior) / anterior) * 100;
 }
 
+// Ingresos y gastos de los últimos `meses` períodos, del más viejo al más nuevo.
+function calcularSerieMensual(periodoFin, meses = 6) {
+    return Array.from({ length: meses }, (_, i) => {
+        const p = desplazarPeriodo(periodoFin, i - meses + 1);
+        return { periodo: p, ingresos: totalPorTipo(p, 'ingreso'), gastos: totalPorTipo(p, 'gasto') };
+    });
+}
+
 // Monto por categoría en el período. La clave null agrupa lo que no tiene categoría.
 function calcularMontoPorCategoria(tipo, periodo) {
     const montos = new Map();
@@ -577,7 +706,9 @@ export {
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
     buscarYFiltrar, agruparPorDia,
     periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
-    calcularResumen, calcularPromedioDiario, calcularVariacionGastos,
+    calcularResumen, calcularPromedioDiario, calcularVariacionGastos, calcularSerieMensual,
     obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
-    formatearMoneda, formatearFecha, etiquetaDia
+    formatearMoneda, formatearFecha, etiquetaDia,
+    validarRespaldo, reemplazarDatos, exportarRespaldo, exportarCSV,
+    cargarDatosDeEjemplo, reiniciarDatos, hayMovimientos
 };

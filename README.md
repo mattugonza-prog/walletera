@@ -2,7 +2,7 @@
 
 Billetera personal para ordenar tu plata: cuentas, transferencias, presupuestos por categoría y un análisis mensual de ingresos y gastos. Funciona en el navegador, sin registro y sin conexión.
 
-**[Probar la demo →](https://mattugonza-prog.github.io/walletera/)** · En Ajustes, "Cargar datos de ejemplo" llena la app con tres meses de movimientos para explorarla.
+Para explorarla sin cargar nada a mano: en Ajustes, "Cargar datos de ejemplo" llena la app con tres meses de movimientos.
 
 ![CI](https://github.com/mattugonza-prog/walletera/actions/workflows/ci.yml/badge.svg)
 
@@ -31,7 +31,7 @@ Billetera personal para ordenar tu plata: cuentas, transferencias, presupuestos 
 
 ## Decisiones técnicas
 
-- **JavaScript sin frameworks ni paso de build.** Módulos ES nativos, separados en una capa de datos (`js/datos.js`), sin acceso al DOM y testeable, y una capa de presentación (`main.js`). Se publica tal cual en GitHub Pages.
+- **JavaScript sin frameworks ni paso de build.** Módulos ES nativos, separados en una capa de datos (`js/datos.js`), sin acceso al DOM y testeable, y una capa de presentación (`main.js`). El "build" solo copia los archivos que usa la app a `dist/`.
 - **Persistencia en LocalStorage con migraciones versionadas.** Cada cambio de esquema tiene su paso (v1 → v5). Los datos viejos se validan y se convierten en vez de borrarse, y antes de migrar se guarda un respaldo.
 - **Fechas sin zona horaria.** Se guardan como `AAAA-MM-DD`, lo que evita que un movimiento cargado en Argentina (UTC−3) aparezca el día anterior. La migración corrige los datos que se habían guardado con ese error.
 - **Seguridad básica.** Todo texto del usuario se escapa antes de insertarse en el HTML. El CSV neutraliza fórmulas (`=`, `+`, `-`, `@`) y un respaldo importado se valida registro por registro.
@@ -77,7 +77,9 @@ Los tests corren con la zona horaria de Buenos Aires para cubrir los casos de fe
 
 ## Publicación
 
-El workflow `.github/workflows/ci.yml` publica la app en GitHub Pages en cada push a `main`. Para activarlo por primera vez: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+Está preparada para [Vercel](https://vercel.com): `vercel.json` define el build (`npm run build`, que arma `dist/`) y los encabezados del service worker. Para publicarla, en Vercel: **Add New → Project → importar `mattugonza-prog/walletera`**, sin cambiar nada. Desde ahí, cada push a `main` se publica solo y cada pull request tiene su propia vista previa.
+
+El workflow `.github/workflows/ci.yml` corre lint, tests y build en cada push y pull request.
 
 ## Origen
 

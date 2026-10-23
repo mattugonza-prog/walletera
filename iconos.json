@@ -1,12 +1,11 @@
 [
-    { "grupo": "Comida y bebida",       "iconos": ["🍔","🍕","🛒","🥗","🍎","🍞","☕","🍷","🍺","🧉","🥩","🍗","🍣","🍦","🎂","🥑","🍩","🧀"] },
-    { "grupo": "Hogar y servicios",      "iconos": ["🏠","🏡","🛋️","💡","🔥","💧","🚿","🧹","🧺","🛠️","🔌","📺","🧴","🪑","🧯","🔑"] },
-    { "grupo": "Transporte",             "iconos": ["🚗","🚙","⛽","🚌","🚕","🚆","🚇","✈️","🚲","🛵","🏍️","🛴","🚢","🅿️","🚦","🛣️"] },
-    { "grupo": "Salud y cuidado",        "iconos": ["💊","🏥","💉","🩺","🦷","👓","💪","🧘","🩹","🌡️","🧼","🧽"] },
-    { "grupo": "Educación y trabajo",    "iconos": ["📚","✏️","🎓","💻","🖊️","📖","🗂️","🔬","📐","🧮","💼","📝"] },
-    { "grupo": "Ocio y entretenimiento", "iconos": ["🎬","🎮","🎵","🎸","🎤","🎧","📷","🎨","🎯","🎲","🎟️","🍿","🎪","🏖️","⚽","🎳"] },
-    { "grupo": "Indumentaria y belleza", "iconos": ["👕","👗","👟","👜","🧥","🧢","👔","👠","💄","💇","🕶️","🧦","👖"] },
-    { "grupo": "Mascotas",               "iconos": ["🐶","🐱","🐰","🐹","🐦","🐠","🐢","🐾","🦴"] },
-    { "grupo": "Dinero y finanzas",      "iconos": ["💰","💵","💳","🏦","📈","📉","💸","🪙","🧾","💎","📊","🔐"] },
-    { "grupo": "Otros",                  "iconos": ["🎁","🎉","❤️","⭐","🔔","📌","🌱","🛍️","🧳","⚙️","♻️","🌍"] }
+    { "grupo": "Comida",              "iconos": ["ph-fork-knife", "ph-shopping-cart", "ph-coffee", "ph-hamburger", "ph-wine", "ph-bread"] },
+    { "grupo": "Hogar y servicios",   "iconos": ["ph-house", "ph-lightning", "ph-drop", "ph-flame", "ph-phone-call", "ph-wrench"] },
+    { "grupo": "Transporte",          "iconos": ["ph-car", "ph-bus", "ph-gas-pump", "ph-taxi", "ph-train", "ph-airplane", "ph-bicycle"] },
+    { "grupo": "Salud",               "iconos": ["ph-heartbeat", "ph-first-aid", "ph-pill", "ph-tooth", "ph-barbell"] },
+    { "grupo": "Educación y trabajo", "iconos": ["ph-graduation-cap", "ph-book-open", "ph-laptop", "ph-briefcase"] },
+    { "grupo": "Ocio",                "iconos": ["ph-film-slate", "ph-game-controller", "ph-music-notes", "ph-ticket", "ph-umbrella"] },
+    { "grupo": "Compras",             "iconos": ["ph-t-shirt", "ph-shopping-bag", "ph-storefront", "ph-scissors", "ph-gift", "ph-baby", "ph-paw-print"] },
+    { "grupo": "Finanzas",            "iconos": ["ph-piggy-bank", "ph-money", "ph-chart-line-up", "ph-bank", "ph-credit-card", "ph-coins", "ph-hand-coins", "ph-receipt"] },
+    { "grupo": "Otros",               "iconos": ["ph-tag", "ph-heart", "ph-star", "ph-sparkle", "ph-calendar-blank", "ph-dots-three"] }
 ]

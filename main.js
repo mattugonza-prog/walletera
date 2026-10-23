@@ -1,380 +1,657 @@
 // ===== Walletera | main.js =====
-// Capa de presentación: DOM, eventos, render y librerías externas.
+// Capa de presentación: DOM, eventos y render.
+import {
+    TIPOS_CUENTA, COLORES_CATEGORIA,
+    inicializarDatos,
+    obtenerGruposIconos, primerIcono,
+    obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
+    contarMovimientosDeCuenta, contarRecurrentesDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
+    obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria,
+    obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
+    buscarYFiltrar, agruparPorDia,
+    obtenerRecurrentes, obtenerRecurrentePorId, crearRecurrente, editarRecurrente, eliminarRecurrente,
+    obtenerProximosVencimientos, proximaFecha,
+    periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
+    calcularResumen, calcularPromedioDiario, calcularVariacionGastos, calcularSerieMensual,
+    obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
+    formatearMoneda, etiquetaDia, etiquetaProxima,
+    validarRespaldo, reemplazarDatos, exportarRespaldo, exportarCSV,
+    cargarDatosDeEjemplo, reiniciarDatos, hayMovimientos
+} from './js/datos.js';
 
 // ===== Estado de UI =====
+let periodo = periodoActual();
 let filtroActual = 'todos';
 let busquedaActual = '';
+let tipoCategoriaActual = 'gasto';
 let graficoCategorias = null;
-let focoPrevio = null;
+let graficoMensual = null;
+let resolverConfirmacion = null;
+const modalesAbiertos = [];
 
-// ===== Tema (se aplica de inmediato para evitar parpadeo) =====
 const CLAVE_TEMA = 'walletera_tema';
-function temaInicial() {
-    const guardado = localStorage.getItem(CLAVE_TEMA);
-    if (guardado) return guardado;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'oscuro' : 'claro';
-}
-document.documentElement.setAttribute('data-tema', temaInicial());
+const CLAVE_OCULTAR = 'walletera_ocultar_montos';
+const COLOR_META = { oscuro: '#0D0E11', claro: '#F4F5F2' };
+const FUENTE = "'Inter Tight', system-ui, sans-serif";
+const NOMBRES_COLOR = {
+    naranja: 'Naranja', azul: 'Azul', rosa: 'Rosa', verde: 'Verde',
+    violeta: 'Violeta', amarillo: 'Amarillo', turquesa: 'Turquesa', gris: 'Gris'
+};
 
-// Paleta categórica cohesiva (derivada de la marca, no flat-UI 2014)
-const PALETA_GRAFICO = [
-    'oklch(0.62 0.19 280)', 'oklch(0.66 0.16 250)', 'oklch(0.70 0.14 215)',
-    'oklch(0.72 0.14 180)', 'oklch(0.72 0.15 150)', 'oklch(0.78 0.15 110)',
-    'oklch(0.80 0.15 80)',  'oklch(0.72 0.16 45)',  'oklch(0.66 0.18 20)',
-    'oklch(0.62 0.16 335)'
-];
+// Todo texto que viene del usuario o del almacenamiento pasa por acá antes de ir a innerHTML.
+const ENTIDADES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const esc = valor => String(valor).replace(/[&<>"']/g, c => ENTIDADES[c]);
+
+const $ = id => document.getElementById(id);
+const guardarPreferencia = (clave, valor) => { try { localStorage.setItem(clave, valor); } catch { /* sin almacenamiento */ } };
 
 // ===== Inicio =====
 iniciar();
+
 async function iniciar() {
     configurarTema();
+    configurarPrivacidad();
     mostrarSkeletons();
     await inicializarDatos();
-    configurarNavegacion();
+    configurarClicsGlobales();
     configurarModales();
-    configurarFormularioCategoria();
+    configurarConfirmacion();
     configurarFormularioMovimiento();
+    configurarFormularioCuenta();
+    configurarFormularioCategoria();
     configurarBuscadorYFiltros();
-    configurarBotones();
+    configurarAjustes();
     renderizarTodo();
-}
-function renderizarTodo() {
-    renderizarDashboard();
-    renderizarCategorias();
-    renderizarMovimientos();
-    renderizarEstadisticas();
-    const seccionEstadisticas = document.getElementById('estadisticas');
-    if (seccionEstadisticas && seccionEstadisticas.classList.contains('activa')) renderizarGrafico();
+    registrarServiceWorker();
 }
 
-// ===== Tema =====
+// Permite usar la app sin conexión e instalarla (PWA).
+function registrarServiceWorker() {
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+        navigator.serviceWorker.register('./sw.js').catch(() => { /* la app funciona igual sin él */ });
+    }
+}
+
+function renderizarTodo() {
+    renderizarPeriodo();
+    renderizarInicio();
+    renderizarMovimientos();
+    renderizarRecurrentes();
+    renderizarCuentas();
+    renderizarPresupuestos();
+    renderizarAnalisis();
+    if ($('analisis').classList.contains('activa')) renderizarGraficos();
+}
+
+// ===== Formato =====
+const formatearPorcentaje = valor =>
+    `${valor.toLocaleString('es-AR', { maximumFractionDigits: 1 }).replace('-', '−')} %`;
+
+function formatearConSigno(monto) {
+    if (monto > 0) return `+\u00a0${formatearMoneda(monto)}`;
+    return formatearMoneda(monto);
+}
+
+const nombreMes = p => nombrePeriodo(p).split(' ')[0];
+
+// ===== Tema y privacidad =====
 function configurarTema() {
     aplicarTema(document.documentElement.getAttribute('data-tema'));
-    document.getElementById('btnTema').addEventListener('click', () => {
-        const actual = document.documentElement.getAttribute('data-tema');
-        aplicarTema(actual === 'oscuro' ? 'claro' : 'oscuro');
-    });
-}
-function aplicarTema(tema) {
-    document.documentElement.setAttribute('data-tema', tema);
-    localStorage.setItem(CLAVE_TEMA, tema);
-    const meta = document.getElementById('metaThemeColor');
-    if (meta) meta.setAttribute('content', tema === 'oscuro' ? '#221d31' : '#6C5CE7');
-    if (graficoCategorias) renderizarGrafico();
 }
 
-// ===== Navegación SPA =====
-function configurarNavegacion() {
-    document.querySelectorAll('[data-seccion]').forEach(btn => {
-        btn.addEventListener('click', () => irASeccion(btn.dataset.seccion));
+function aplicarTema(tema) {
+    const valor = tema === 'claro' ? 'claro' : 'oscuro';
+    const otro = valor === 'claro' ? 'oscuro' : 'claro';
+    document.documentElement.setAttribute('data-tema', valor);
+    guardarPreferencia(CLAVE_TEMA, valor);
+    $('metaThemeColor')?.setAttribute('content', COLOR_META[valor]);
+    document.querySelectorAll('[data-alternar-tema]').forEach(btn => btn.setAttribute('aria-label', `Cambiar a modo ${otro}`));
+    document.querySelectorAll('.texto-tema').forEach(el => { el.textContent = `Modo ${otro}`; });
+    if (graficoCategorias || graficoMensual) renderizarGraficos();
+}
+
+function configurarPrivacidad() {
+    const btn = $('btnOcultarMontos');
+    const actualizar = () => {
+        const oculto = document.documentElement.classList.contains('ocultar-montos');
+        btn.setAttribute('aria-pressed', String(oculto));
+        btn.setAttribute('aria-label', oculto ? 'Mostrar montos' : 'Ocultar montos');
+    };
+    btn.addEventListener('click', () => {
+        const oculto = document.documentElement.classList.toggle('ocultar-montos');
+        guardarPreferencia(CLAVE_OCULTAR, oculto ? '1' : '0');
+        actualizar();
+    });
+    actualizar();
+}
+
+// ===== Clics globales (delegación) =====
+// Botones que se crean al renderizar también navegan, abren modales o editan.
+function configurarClicsGlobales() {
+    document.addEventListener('click', e => {
+        const objetivo = e.target.closest('[data-seccion], [data-nuevo-movimiento], [data-alternar-tema], [data-periodo], [data-editar-movimiento], [data-editar-cuenta], [data-editar-categoria], [data-cargar-ejemplo], [data-editar-recurrente], [data-nuevo-recurrente]');
+        if (!objetivo) return;
+        const d = objetivo.dataset;
+        if (d.seccion) irASeccion(d.seccion);
+        else if (d.nuevoMovimiento) abrirModalMovimiento(null, d.nuevoMovimiento);
+        else if ('alternarTema' in d) aplicarTema(document.documentElement.getAttribute('data-tema') === 'oscuro' ? 'claro' : 'oscuro');
+        else if (d.periodo) cambiarPeriodo(Number(d.periodo));
+        else if (d.editarMovimiento) abrirModalMovimiento(d.editarMovimiento);
+        else if (d.editarCuenta) abrirModalCuenta(d.editarCuenta);
+        else if (d.editarCategoria) abrirModalCategoria(d.editarCategoria);
+        else if ('cargarEjemplo' in d) cargarEjemplo();
+        else if (d.editarRecurrente) abrirModalMovimiento(null, null, { recurrenteId: d.editarRecurrente });
+        else if ('nuevoRecurrente' in d) abrirModalMovimiento(null, 'gasto', { repetir: 'mensual' });
     });
 }
+
+// ===== Navegación =====
 function irASeccion(idSeccion) {
-    document.querySelectorAll('.seccion').forEach(s => s.classList.remove('activa'));
-    document.getElementById(idSeccion).classList.add('activa');
-    document.querySelectorAll('.nav-btn').forEach(b => {
+    document.querySelectorAll('.seccion').forEach(s => s.classList.toggle('activa', s.id === idSeccion));
+    document.querySelectorAll('.nav-item[data-seccion], .nav-tab').forEach(b => {
         const activa = b.dataset.seccion === idSeccion;
         b.classList.toggle('activa', activa);
         if (activa) b.setAttribute('aria-current', 'page');
         else b.removeAttribute('aria-current');
     });
-    if (idSeccion === 'estadisticas') renderizarGrafico();
+    window.scrollTo({ top: 0 });
+    if (idSeccion === 'analisis') renderizarGraficos();
 }
 
-// ===== Skeletons de carga =====
+// ===== Período =====
+function cambiarPeriodo(meses) {
+    const nuevo = desplazarPeriodo(periodo, meses);
+    if (nuevo > periodoActual()) return;
+    periodo = nuevo;
+    renderizarTodo();
+}
+
+function renderizarPeriodo() {
+    const nombre = nombrePeriodo(periodo).replace(' de ', ' ');
+    document.querySelectorAll('[data-periodo-nombre]').forEach(el => { el.textContent = nombre; });
+    document.querySelectorAll('[data-periodo="1"]').forEach(btn => { btn.disabled = periodo >= periodoActual(); });
+}
+
+// ===== Piezas de render =====
 function mostrarSkeletons() {
-    const filas = n => Array.from({ length: n }, () => '<li class="skeleton skel-fila"></li>').join('');
-    ['ultimosMovimientos', 'listaMovimientos'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = filas(4);
-    });
-    ['resumenCategorias', 'listaCategorias'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = filas(3);
-    });
+    const bloques = n => '<div class="skeleton"></div>'.repeat(n);
+    const filas = n => '<li class="skeleton"></li>'.repeat(n);
+    ['ultimosMovimientos', 'listaMovimientos'].forEach(id => { $(id).innerHTML = bloques(4); });
+    ['resumenPresupuestos', 'proximosVencimientos', 'listaRecurrentes', 'listaCuentas', 'listaCategorias'].forEach(id => { $(id).innerHTML = filas(3); });
 }
 
-// ===== Estado vacío compuesto =====
-function htmlVacio(icono, titulo, sub) {
-    return `<li class="vacio">
+function htmlVacio(icono, titulo, sub, etiqueta = 'div', extra = '') {
+    return `<${etiqueta} class="vacio">
         <i class="ph ${icono}" aria-hidden="true"></i>
         <strong>${titulo}</strong>
         ${sub ? `<span>${sub}</span>` : ''}
-    </li>`;
+        ${extra}
+    </${etiqueta}>`;
 }
 
-// ===== Dashboard =====
-function renderizarDashboard() {
-    document.getElementById('saldoDisponible').textContent     = formatearMoneda(calcularSaldoDisponible());
-    document.getElementById('fondoMensual').textContent        = formatearMoneda(obtenerFondoMensual());
-    document.getElementById('totalGastado').textContent        = formatearMoneda(calcularTotalGastado());
-    document.getElementById('cantidadMovimientos').textContent = calcularCantidadMovimientos();
-    document.getElementById('porcentajeUtilizado').textContent = `${calcularPorcentajeUtilizado().toFixed(1)}%`;
-    renderizarUltimosMovimientos();
-    renderizarResumenCategorias();
-}
-function renderizarUltimosMovimientos() {
-    const cont = document.getElementById('ultimosMovimientos');
-    const ultimos = obtenerMovimientos().slice(0, 5);
-    if (ultimos.length === 0) {
-        cont.innerHTML = htmlVacio('ph-tray', 'Todavía no hay movimientos', 'Tocá el botón + para registrar el primero.');
-        return;
+const tile = (icono, color) =>
+    `<span class="icono-tile tono-${color}"><i class="ph ${esc(icono)}" aria-hidden="true"></i></span>`;
+
+const nombreCuenta = id => esc(obtenerCuentaPorId(id)?.nombre ?? 'Cuenta eliminada');
+
+// Ícono, detalle y monto de un movimiento (o de la plantilla de un recurrente).
+function partesMovimiento(m) {
+    let icono, color, meta, monto, claseMonto;
+    if (m.tipo === 'transferencia') {
+        [icono, color] = ['ph-arrows-left-right', 'gris'];
+        meta = `${nombreCuenta(m.cuentaId)} → ${nombreCuenta(m.cuentaDestinoId)}`;
+        monto = formatearMoneda(m.monto);
+        claseMonto = 'transferencia';
+    } else {
+        const cat = m.categoriaId ? obtenerCategoriaPorId(m.categoriaId) : null;
+        const esIngreso = m.tipo === 'ingreso';
+        [icono, color] = cat ? [cat.icono, cat.color] : (esIngreso ? ['ph-arrow-down-left', 'verde'] : ['ph-receipt', 'gris']);
+        meta = `${cat ? esc(cat.nombre) : 'Sin categoría'} · ${nombreCuenta(m.cuentaId)}`;
+        monto = esIngreso ? formatearConSigno(m.monto) : formatearMoneda(-m.monto);
+        claseMonto = esIngreso ? 'ingreso' : '';
     }
-    cont.innerHTML = ultimos.map((m, i) => crearHTMLMovimiento(m, false, i)).join('');
-}
-function renderizarResumenCategorias() {
-    const cont = document.getElementById('resumenCategorias');
-    const cats = obtenerCategorias();
-    if (cats.length === 0) {
-        cont.innerHTML = htmlVacio('ph-squares-four', 'No hay categorías');
-        return;
-    }
-    cont.innerHTML = cats.slice(0, 5).map(c => `
-        <li class="categoria-mini">
-            <span class="categoria-mini-icono">${c.icono}</span>
-            <span class="categoria-mini-nombre">${c.nombre}</span>
-            <span class="categoria-mini-monto">${formatearMoneda(c.gastado)} / ${formatearMoneda(c.presupuesto)}</span>
-        </li>
-    `).join('');
+    return { icono, color, meta, monto, claseMonto };
 }
 
-// ===== Categorías =====
-function renderizarCategorias() {
-    const cont = document.getElementById('listaCategorias');
-    const cats = obtenerCategorias();
-    if (cats.length === 0) {
-        cont.innerHTML = htmlVacio('ph-squares-four', 'Todavía no hay categorías', 'Creá la primera con el botón de arriba.');
-        return;
+const ICONO_RECURRENTE = '<i class="ph ph-repeat icono-recurrente" aria-hidden="true"></i><span class="visualmente-oculto">Recurrente. </span>';
+
+function filaMovimiento(m) {
+    const { icono, color, meta, monto, claseMonto } = partesMovimiento(m);
+    return `
+        <button class="fila" type="button" data-editar-movimiento="${esc(m.id)}">
+            ${tile(icono, color)}
+            <span class="fila-texto">
+                <span class="fila-nombre">${esc(m.descripcion)}</span>
+                <span class="fila-meta">${m.recurrenteId ? ICONO_RECURRENTE : ''}${meta}</span>
+            </span>
+            <span class="fila-monto monto ${claseMonto}">${monto}</span>
+        </button>`;
+}
+
+const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+function textoFrecuencia(r) {
+    if (r.frecuencia === 'semanal') {
+        const [a, m, d] = r.inicio.split('-').map(Number);
+        return `Cada ${DIAS_SEMANA[new Date(a, m - 1, d).getDay()]}`;
     }
-    cont.innerHTML = cats.map((c, i) => {
-        const disponible = c.presupuesto - c.gastado;
-        const porcentaje = c.presupuesto > 0 ? (c.gastado / c.presupuesto) * 100 : 0;
-        const salud = porcentaje >= 100 ? 'alerta' : (porcentaje >= 80 ? 'cerca' : '');
-        return `
-            <li class="categoria" style="--i:${i}">
-                <div class="categoria-encabezado">
-                    <span class="categoria-icono">${c.icono}</span>
-                    <span class="categoria-nombre">${c.nombre}</span>
-                    <div class="categoria-acciones">
-                        <button class="movimiento-accion" data-editar-categoria="${c.id}" aria-label="Editar ${c.nombre}"><i class="ph ph-pencil-simple"></i></button>
-                        <button class="movimiento-accion peligro" data-eliminar-categoria="${c.id}" aria-label="Eliminar ${c.nombre}"><i class="ph ph-trash"></i></button>
-                    </div>
-                </div>
-                <div class="categoria-datos">
-                    <div class="categoria-dato">
-                        <span>Presupuesto</span>
-                        <strong>${formatearMoneda(c.presupuesto)}</strong>
-                    </div>
-                    <div class="categoria-dato">
-                        <span>Gastado</span>
-                        <strong>${formatearMoneda(c.gastado)}</strong>
-                    </div>
-                    <div class="categoria-dato">
-                        <span>Disponible</span>
-                        <strong>${formatearMoneda(disponible)}</strong>
-                    </div>
-                </div>
-                <div class="barra-progreso">
-                    <div class="barra-progreso-relleno ${salud}" data-w="${Math.min(porcentaje, 100)}" style="width:0"></div>
-                </div>
-                <div class="categoria-porcentaje">${porcentaje.toFixed(1)}% utilizado</div>
-            </li>
-        `;
-    }).join('');
-    // Animar barras desde 0 hasta su valor real
+    return `Cada mes, el día ${Number(r.inicio.slice(8, 10))}`;
+}
+
+// conDetalle: la lista completa muestra la frecuencia; Inicio, cuándo vence.
+function filaRecurrente(r, fecha, conDetalle) {
+    const { icono, color, monto, claseMonto } = partesMovimiento(r);
+    const cuenta = r.tipo === 'transferencia'
+        ? `${nombreCuenta(r.cuentaId)} → ${nombreCuenta(r.cuentaDestinoId)}`
+        : nombreCuenta(r.cuentaId);
+    const meta = conDetalle ? `${textoFrecuencia(r)} · ${cuenta}` : `${etiquetaProxima(fecha)} · ${cuenta}`;
+    return `
+        <button class="fila" type="button" data-editar-recurrente="${esc(r.id)}">
+            ${tile(icono, color)}
+            <span class="fila-texto">
+                <span class="fila-nombre">${esc(r.descripcion)}</span>
+                <span class="fila-meta">${meta}</span>
+            </span>
+            <span class="fila-lado">
+                <span class="fila-monto monto ${claseMonto}">${monto}</span>
+                ${conDetalle ? `<span class="fila-meta">${etiquetaProxima(fecha)}</span>` : ''}
+            </span>
+        </button>`;
+}
+
+function htmlGrupos(lista) {
+    return `<div class="grupos">${agruparPorDia(lista).map(g => `
+        <section class="grupo-dia">
+            <h3 class="grupo-dia-titulo">
+                <span>${etiquetaDia(g.fecha)}</span>
+                <span class="monto">${g.soloTransferencias ? 'Entre cuentas' : formatearConSigno(g.neto)}</span>
+            </h3>
+            ${g.movimientos.map(filaMovimiento).join('')}
+        </section>`).join('')}</div>`;
+}
+
+function claseSalud(porcentaje) {
+    if (porcentaje >= 100) return 'excedida';
+    if (porcentaje >= 80) return 'cerca';
+    return '';
+}
+
+function filaPresupuesto(c, conLado = true) {
+    const porcentaje = c.presupuesto > 0 ? (c.monto / c.presupuesto) * 100 : 0;
+    const restante = c.presupuesto - c.monto;
+    let lado = '';
+    if (conLado) {
+        lado = c.presupuesto <= 0
+            ? '<span class="fila-meta">Sin presupuesto</span>'
+            : restante >= 0
+                ? `<span class="fila-meta">Quedan</span><span class="fila-monto monto">${formatearMoneda(restante)}</span>`
+                : `<span class="fila-meta">Excedido</span><span class="fila-monto monto negativo">${formatearMoneda(-restante)}</span>`;
+    }
+    return `
+        <button class="fila fila-presupuesto" type="button" data-editar-categoria="${esc(c.id)}">
+            ${tile(c.icono, c.color)}
+            <span class="fila-texto">
+                <span class="fila-nombre">${esc(c.nombre)}</span>
+                <span class="fila-meta monto">${formatearMoneda(c.monto)} de ${formatearMoneda(c.presupuesto)}</span>
+            </span>
+            ${conLado ? `<span class="fila-lado">${lado}</span>` : `<span class="fila-meta">${formatearPorcentaje(porcentaje)}</span>`}
+            <span class="barra"><span class="barra-relleno ${claseSalud(porcentaje)}" data-ancho="${Math.min(porcentaje, 100)}"></span></span>
+        </button>`;
+}
+
+// Las barras se animan desde 0 hasta su valor real.
+function animarBarras(contenedor) {
     requestAnimationFrame(() => {
-        cont.querySelectorAll('.barra-progreso-relleno').forEach(b => { b.style.width = `${b.dataset.w}%`; });
+        contenedor.querySelectorAll('.barra-relleno[data-ancho]').forEach(b => { b.style.width = `${b.dataset.ancho}%`; });
     });
-    cont.querySelectorAll('[data-editar-categoria]').forEach(btn => {
-        btn.addEventListener('click', () => abrirModalCategoria(btn.dataset.editarCategoria));
-    });
-    cont.querySelectorAll('[data-eliminar-categoria]').forEach(btn => {
-        btn.addEventListener('click', () => confirmarEliminarCategoria(btn.dataset.eliminarCategoria));
-    });
+}
+
+// ===== Inicio =====
+function renderizarInicio() {
+    const hora = new Date().getHours();
+    $('saludo').textContent = hora >= 5 && hora < 13 ? 'Buen día' : (hora >= 13 && hora < 20 ? 'Buenas tardes' : 'Buenas noches');
+    const hoy = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(',', '');
+    $('fechaHoy').textContent = hoy.charAt(0).toUpperCase() + hoy.slice(1);
+
+    const resumen = calcularResumen(periodo);
+    const cuentas = obtenerCuentasConSaldo();
+    const mes = nombreMes(periodo);
+    $('saldoTotal').textContent = formatearMoneda(calcularSaldoTotal());
+    $('saldoCuentas').textContent = cuentas.length === 1 ? 'En 1 cuenta' : `En ${cuentas.length} cuentas`;
+
+    const pastilla = $('resultadoMes');
+    pastilla.textContent = resumen.cantidad
+        ? `${formatearConSigno(resumen.resultado)} en ${mes}`
+        : `Sin movimientos en ${mes}`;
+    pastilla.classList.toggle('negativa', resumen.resultado < 0);
+
+    $('resumenCuentas').innerHTML = cuentas.map(c => `
+        <li>
+            <button class="cuenta-mini" type="button" data-editar-cuenta="${esc(c.id)}">
+                <i class="ph ${TIPOS_CUENTA[c.tipo].icono}" aria-hidden="true"></i>
+                <span>
+                    <span class="cuenta-mini-nombre">${esc(c.nombre)}</span>
+                    <span class="cuenta-mini-saldo monto ${c.saldo < 0 ? 'negativo' : ''}">${formatearMoneda(c.saldo)}</span>
+                </span>
+            </button>
+        </li>`).join('');
+
+    $('tituloResumenMes').textContent = mes;
+    $('presupuestoUsado').textContent = resumen.presupuesto > 0
+        ? `Presupuesto ${formatearPorcentaje(resumen.porcentajePresupuesto)} usado`
+        : 'Sin presupuestos';
+    const barra = $('barraPresupuesto');
+    barra.className = `barra-relleno ${claseSalud(resumen.porcentajePresupuesto)}`;
+    barra.dataset.ancho = Math.min(resumen.porcentajePresupuesto, 100);
+    animarBarras(barra.parentElement);
+    $('ingresosMes').textContent = formatearConSigno(resumen.ingresos);
+    $('gastosMes').textContent = formatearMoneda(resumen.gastos);
+
+    const ultimos = obtenerMovimientos(periodo).slice(0, 6);
+    // Sin ningún movimiento todavía, se ofrece cargar datos de ejemplo para explorar.
+    $('ultimosMovimientos').innerHTML = ultimos.length
+        ? htmlGrupos(ultimos)
+        : hayMovimientos()
+            ? htmlVacio('ph-tray', `Sin movimientos en ${mes}`, 'Tocá + para registrar uno.')
+            : htmlVacio('ph-tray', 'Todavía no hay movimientos', 'Registrá el primero con + o explorá la app con datos de ejemplo.', 'div',
+                '<button class="btn btn-secundario" type="button" data-cargar-ejemplo><i class="ph ph-sparkle" aria-hidden="true"></i> Cargar datos de ejemplo</button>');
+
+    const conPresupuesto = obtenerCategoriasConMonto('gasto', periodo)
+        .filter(c => c.presupuesto > 0)
+        .sort((a, b) => b.monto / b.presupuesto - a.monto / a.presupuesto)
+        .slice(0, 4);
+    $('resumenPresupuestos').innerHTML = conPresupuesto.length
+        ? conPresupuesto.map(c => `<li>${filaPresupuesto(c, false)}</li>`).join('')
+        : htmlVacio('ph-target', 'Sin presupuestos', 'Asigná un presupuesto mensual a tus categorías.', 'li');
+    animarBarras($('resumenPresupuestos'));
 }
 
 // ===== Movimientos =====
 function renderizarMovimientos() {
-    const cont = document.getElementById('listaMovimientos');
-    const lista = buscarYFiltrar(busquedaActual, filtroActual);
+    const resumen = calcularResumen(periodo);
+    $('movIngresos').textContent = formatearConSigno(resumen.ingresos);
+    $('movGastos').textContent = formatearMoneda(resumen.gastos);
+    const lista = buscarYFiltrar(busquedaActual, filtroActual, periodo);
     if (lista.length === 0) {
-        const vacio = busquedaActual || filtroActual !== 'todos'
-            ? htmlVacio('ph-magnifying-glass', 'Sin resultados', 'Probá con otro texto o filtro.')
-            : htmlVacio('ph-tray', 'Todavía no hay movimientos', 'Tocá el botón + para registrar el primero.');
-        cont.innerHTML = vacio;
+        $('listaMovimientos').innerHTML = busquedaActual || filtroActual !== 'todos'
+            ? htmlVacio('ph-magnifying-glass', 'Sin resultados', 'Probá con otro texto, filtro o mes.')
+            : htmlVacio('ph-tray', `Sin movimientos en ${nombreMes(periodo)}`, 'Tocá + para registrar el primero.');
         return;
     }
-    cont.innerHTML = lista.map((m, i) => crearHTMLMovimiento(m, true, i)).join('');
-    cont.querySelectorAll('[data-editar-movimiento]').forEach(btn => {
-        btn.addEventListener('click', () => abrirModalMovimiento(btn.dataset.editarMovimiento));
-    });
-    cont.querySelectorAll('[data-eliminar-movimiento]').forEach(btn => {
-        btn.addEventListener('click', () => confirmarEliminarMovimiento(btn.dataset.eliminarMovimiento));
-    });
-}
-function crearHTMLMovimiento(m, conAcciones, indice = 0) {
-    const cat = obtenerCategoriaPorId(m.categoriaId);
-    const iconoHTML = cat
-        ? `<span class="movimiento-icono">${cat.icono}</span>`
-        : `<span class="movimiento-icono"><i class="ph ph-receipt"></i></span>`;
-    const nombreCat = cat ? cat.nombre : 'Sin categoría';
-    const signo = m.tipo === 'ingreso' ? '+' : '-';
-    const acciones = conAcciones ? `
-        <div class="movimiento-acciones">
-            <button class="movimiento-accion" data-editar-movimiento="${m.id}" aria-label="Editar"><i class="ph ph-pencil-simple"></i></button>
-            <button class="movimiento-accion peligro" data-eliminar-movimiento="${m.id}" aria-label="Eliminar"><i class="ph ph-trash"></i></button>
-        </div>
-    ` : '';
-    return `
-        <li class="movimiento movimiento-${m.tipo}" style="--i:${indice}">
-            ${iconoHTML}
-            <div class="movimiento-info">
-                <div class="movimiento-descripcion">${m.descripcion}</div>
-                <div class="movimiento-meta">${nombreCat} · ${formatearFecha(m.fecha)}</div>
-            </div>
-            <div class="movimiento-monto">${signo} ${formatearMoneda(m.monto)}</div>
-            ${acciones}
-        </li>
-    `;
+    $('listaMovimientos').innerHTML = htmlGrupos(lista);
 }
 
-// ===== Buscador y filtros =====
 function configurarBuscadorYFiltros() {
-    document.getElementById('buscador').addEventListener('input', e => {
+    $('btnBuscar').addEventListener('click', () => {
+        const campo = $('campoBuscar');
+        const abrir = campo.hidden;
+        campo.hidden = !abrir;
+        $('btnBuscar').setAttribute('aria-expanded', String(abrir));
+        if (abrir) {
+            $('buscador').focus();
+        } else if (busquedaActual) {
+            $('buscador').value = '';
+            busquedaActual = '';
+            renderizarMovimientos();
+        }
+    });
+    $('buscador').addEventListener('input', e => {
         busquedaActual = e.target.value;
         renderizarMovimientos();
     });
-    document.querySelectorAll('.filtro-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.filtro-btn').forEach(b => b.classList.remove('activa'));
-            btn.classList.add('activa');
-            filtroActual = btn.dataset.filtro;
-            renderizarMovimientos();
-        });
+    configurarChips('filtrosMovimientos', btn => {
+        filtroActual = btn.dataset.filtro;
+        renderizarMovimientos();
+    });
+    configurarChips('filtrosCategorias', btn => {
+        tipoCategoriaActual = btn.dataset.tipoCategoria;
+        renderizarPresupuestos();
     });
 }
 
-// ===== Estadísticas =====
-function renderizarEstadisticas() {
-    const top = obtenerCategoriaMasGastada();
-    document.getElementById('statCategoriaTop').textContent       = top && top.gastado > 0 ? `${top.icono} ${top.nombre}` : 'Sin datos';
-    document.getElementById('statTotalGastado').textContent       = formatearMoneda(calcularTotalGastado());
-    document.getElementById('statPromedioDiario').textContent     = formatearMoneda(calcularPromedioDiario());
-    document.getElementById('statCantidadMovimientos').textContent= calcularCantidadMovimientos();
-    document.getElementById('statPorcentajeConsumido').textContent= `${calcularPorcentajeUtilizado().toFixed(1)}%`;
+function configurarChips(idGrupo, alElegir) {
+    const grupo = $(idGrupo);
+    grupo.addEventListener('click', e => {
+        const btn = e.target.closest('.chip');
+        if (!btn) return;
+        grupo.querySelectorAll('.chip').forEach(b => {
+            b.classList.toggle('activa', b === btn);
+            b.setAttribute('aria-pressed', String(b === btn));
+        });
+        alElegir(btn);
+    });
 }
-function renderizarGrafico() {
-    const ctx = document.getElementById('graficoCategorias');
-    if (!ctx || typeof Chart === 'undefined') return;
-    const contenedor = ctx.parentElement;
-    const cats = obtenerCategorias().filter(c => c.gastado > 0);
-    let aviso = contenedor.querySelector('.grafico-vacio');
 
+// ===== Recurrentes =====
+function renderizarProximos() {
+    const proximos = obtenerProximosVencimientos(30).slice(0, 4);
+    $('proximosVencimientos').innerHTML = proximos.length
+        ? proximos.map(v => `<li>${filaRecurrente(v.recurrente, v.fecha, false)}</li>`).join('')
+        : htmlVacio('ph-repeat', 'Sin vencimientos en los próximos 30 días', 'Marcá un movimiento como "Se repite" y se registra solo.', 'li');
+}
+
+function renderizarRecurrentes() {
+    renderizarProximos();
+    const lista = obtenerRecurrentes();
+    // Equivalente mensual: las semanales cuentan 52/12 veces por mes.
+    const porMes = tipo => lista
+        .filter(r => r.tipo === tipo)
+        .reduce((acc, r) => acc + (r.frecuencia === 'semanal' ? (r.monto * 52) / 12 : r.monto), 0);
+    $('recIngresos').textContent = formatearConSigno(Math.round(porMes('ingreso')));
+    $('recGastos').textContent = formatearMoneda(Math.round(porMes('gasto')));
+    $('listaRecurrentes').innerHTML = lista.length
+        ? lista.map(r => `<li>${filaRecurrente(r, proximaFecha(r), true)}</li>`).join('')
+        : htmlVacio('ph-repeat', 'Todavía no hay recurrentes', 'Creá uno con + o marcá "Se repite" al registrar un movimiento.', 'li');
+}
+
+// ===== Cuentas =====
+function renderizarCuentas() {
+    $('totalCuentas').textContent = formatearMoneda(calcularSaldoTotal());
+    const cuentas = obtenerCuentasConSaldo();
+    $('listaCuentas').innerHTML = cuentas.length
+        ? cuentas.map(c => `
+            <li>
+                <button class="fila" type="button" data-editar-cuenta="${esc(c.id)}">
+                    ${tile(TIPOS_CUENTA[c.tipo].icono, 'gris')}
+                    <span class="fila-texto">
+                        <span class="fila-nombre">${esc(c.nombre)}</span>
+                        <span class="fila-meta">${TIPOS_CUENTA[c.tipo].nombre}</span>
+                    </span>
+                    <span class="fila-monto monto ${c.saldo < 0 ? 'negativo' : ''}">${formatearMoneda(c.saldo)}</span>
+                </button>
+            </li>`).join('')
+        : htmlVacio('ph-wallet', 'Todavía no hay cuentas', 'Creá la primera con el botón +.', 'li');
+}
+
+// ===== Presupuestos =====
+function renderizarPresupuestos() {
+    const cats = obtenerCategoriasConMonto(tipoCategoriaActual, periodo);
+    const cont = $('listaCategorias');
     if (cats.length === 0) {
-        if (graficoCategorias) { graficoCategorias.destroy(); graficoCategorias = null; }
-        ctx.style.display = 'none';
-        if (!aviso) {
-            aviso = document.createElement('div');
-            aviso.className = 'vacio grafico-vacio';
-            aviso.innerHTML = '<i class="ph ph-chart-pie-slice" aria-hidden="true"></i><strong>Sin gastos para mostrar</strong><span>Registrá un gasto para ver el desglose.</span>';
-            contenedor.appendChild(aviso);
-        }
+        cont.innerHTML = htmlVacio('ph-squares-four', 'Todavía no hay categorías', 'Creá la primera con el botón +.', 'li');
         return;
     }
-    if (aviso) aviso.remove();
-    ctx.style.display = '';
+    const mes = nombreMes(periodo);
+    cont.innerHTML = cats.map(c => `<li>${c.tipo === 'gasto'
+        ? filaPresupuesto(c)
+        : `<button class="fila" type="button" data-editar-categoria="${esc(c.id)}">
+                ${tile(c.icono, c.color)}
+                <span class="fila-texto">
+                    <span class="fila-nombre">${esc(c.nombre)}</span>
+                    <span class="fila-meta">Recibido en ${mes}</span>
+                </span>
+                <span class="fila-monto monto ${c.monto > 0 ? 'ingreso' : ''}">${formatearConSigno(c.monto)}</span>
+            </button>`}</li>`).join('');
+    animarBarras(cont);
+}
 
+// ===== Análisis =====
+function renderizarAnalisis() {
+    const resumen = calcularResumen(periodo);
+    const top = obtenerCategoriaMasGastada(periodo);
+    const variacion = calcularVariacionGastos(periodo);
+    $('statIngresos').textContent      = formatearConSigno(resumen.ingresos);
+    $('statGastos').textContent        = formatearMoneda(resumen.gastos);
+    $('statPromedioDiario').textContent = formatearMoneda(calcularPromedioDiario(periodo));
+    $('statPresupuesto').textContent   = resumen.presupuesto > 0 ? formatearPorcentaje(resumen.porcentajePresupuesto) : '—';
+    $('statVariacion').textContent     = variacion === null ? '—' : `${variacion > 0 ? '+' : ''}${formatearPorcentaje(variacion)}`;
+    $('statCategoriaTop').textContent  = top ? top.nombre : '—';
+}
+
+function renderizarGraficos() {
+    renderizarGrafico();
+    renderizarGraficoMensual();
+}
+
+function renderizarGraficoMensual() {
+    const ctx = $('graficoMensual');
+    if (!ctx || typeof Chart === 'undefined') return;
+    const serie = calcularSerieMensual(periodo, 6);
     const estilos = getComputedStyle(document.documentElement);
-    const colorTexto = estilos.getPropertyValue('--tinta-suave').trim() || '#888';
-    const colorBorde = estilos.getPropertyValue('--superficie').trim() || '#fff';
+    const token = nombre => estilos.getPropertyValue(nombre).trim();
+    const compacto = new Intl.NumberFormat('es-AR', { notation: 'compact', maximumFractionDigits: 1 });
+    const etiqueta = p => {
+        const [a, m] = p.split('-').map(Number);
+        const texto = new Date(a, m - 1, 1).toLocaleDateString('es-AR', { month: 'short' }).replace('.', '');
+        return texto.charAt(0).toUpperCase() + texto.slice(1);
+    };
 
-    const etiquetas = cats.map(c => `${c.icono} ${c.nombre}`);
-    const valores   = cats.map(c => c.gastado);
-
-    if (graficoCategorias) graficoCategorias.destroy();
-    graficoCategorias = new Chart(ctx, {
-        type: 'doughnut',
+    graficoMensual?.destroy();
+    graficoMensual = new Chart(ctx, {
+        type: 'bar',
         data: {
-            labels: etiquetas,
-            datasets: [{
-                data: valores,
-                backgroundColor: PALETA_GRAFICO,
-                borderColor: colorBorde,
-                borderWidth: 3,
-                hoverOffset: 8
-            }]
+            labels: serie.map(s => etiqueta(s.periodo)),
+            datasets: [
+                { label: 'Ingresos', data: serie.map(s => s.ingresos), backgroundColor: token('--barra-ok'), borderRadius: 6, maxBarThickness: 22 },
+                { label: 'Gastos', data: serie.map(s => s.gastos), backgroundColor: token('--tinta-suave'), borderRadius: 6, maxBarThickness: 22 }
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            cutout: '62%',
-            animation: { duration: prefiereMenosMovimiento() ? 0 : 600, easing: 'easeOutQuart' },
+            animation: { duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 500 },
+            scales: {
+                x: { grid: { display: false }, border: { display: false }, ticks: { color: token('--tinta-suave'), font: { family: FUENTE } } },
+                y: {
+                    grid: { color: token('--borde') },
+                    border: { display: false },
+                    ticks: { color: token('--tinta-suave'), font: { family: FUENTE }, callback: v => compacto.format(v), maxTicksLimit: 5 }
+                }
+            },
             plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: {
-                        color: colorTexto,
-                        usePointStyle: true,
-                        pointStyle: 'circle',
-                        padding: 14,
-                        font: { family: 'Manrope', size: 12, weight: '600' }
-                    }
-                },
+                legend: { position: 'bottom', labels: { color: token('--tinta-suave'), usePointStyle: true, pointStyle: 'circle', padding: 14, font: { family: FUENTE, size: 13 } } },
                 tooltip: {
-                    padding: 12,
-                    cornerRadius: 10,
-                    titleFont: { family: 'Manrope', weight: '700' },
-                    bodyFont: { family: 'Manrope' },
-                    callbacks: {
-                        label: c => ` ${formatearMoneda(c.parsed)}`
-                    }
+                    padding: 12, cornerRadius: 10,
+                    titleFont: { family: FUENTE, weight: '600' }, bodyFont: { family: FUENTE },
+                    callbacks: { label: c => ` ${c.dataset.label}: ${formatearMoneda(c.parsed.y)}` }
                 }
             }
         }
     });
 }
-function prefiereMenosMovimiento() {
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function renderizarGrafico() {
+    const ctx = $('graficoCategorias');
+    if (!ctx || typeof Chart === 'undefined') return;
+    const contenedor = ctx.parentElement;
+    const datos = obtenerDatosGrafico(periodo);
+    contenedor.querySelector('.vacio')?.remove();
+
+    if (datos.length === 0) {
+        graficoCategorias?.destroy();
+        graficoCategorias = null;
+        ctx.hidden = true;
+        contenedor.insertAdjacentHTML('beforeend', htmlVacio('ph-chart-pie-slice', `Sin gastos en ${nombreMes(periodo)}`, 'Registrá un gasto para ver el desglose.'));
+        return;
+    }
+    ctx.hidden = false;
+
+    const estilos = getComputedStyle(document.documentElement);
+    const token = nombre => estilos.getPropertyValue(nombre).trim();
+    const reducirMovimiento = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    graficoCategorias?.destroy();
+    graficoCategorias = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: datos.map(d => d.etiqueta),
+            datasets: [{
+                data: datos.map(d => d.valor),
+                backgroundColor: datos.map(d => token(`--${d.color}-fg`)),
+                borderColor: token('--superficie'),
+                borderWidth: 3,
+                hoverOffset: 6
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '68%',
+            animation: { duration: reducirMovimiento ? 0 : 600, easing: 'easeOutQuart' },
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        color: token('--tinta-suave'),
+                        usePointStyle: true,
+                        pointStyle: 'circle',
+                        padding: 14,
+                        font: { family: FUENTE, size: 13, weight: '500' }
+                    }
+                },
+                tooltip: {
+                    padding: 12,
+                    cornerRadius: 10,
+                    titleFont: { family: FUENTE, weight: '600' },
+                    bodyFont: { family: FUENTE },
+                    callbacks: { label: c => ` ${formatearMoneda(c.parsed)}` }
+                }
+            }
+        }
+    });
 }
 
-// ===== Botones globales =====
-function configurarBotones() {
-    document.getElementById('btnNuevaCategoria').addEventListener('click', () => abrirModalCategoria());
-    document.getElementById('btnNuevoMovimiento').addEventListener('click', () => abrirModalMovimiento());
-    document.getElementById('btnEditarFondo').addEventListener('click', editarFondoMensual);
-}
-
-// ===== Modales (apertura/cierre + foco accesible) =====
+// ===== Modales =====
 function configurarModales() {
     document.querySelectorAll('[data-cerrar]').forEach(el => {
         el.addEventListener('click', () => cerrarModal(el.dataset.cerrar));
     });
 }
-function abrirModal(id) {
-    const modal = document.getElementById(id);
-    focoPrevio = document.activeElement;
+
+function abrirModal(id, enfocar) {
+    const modal = $(id);
+    modalesAbiertos.push({ id, foco: document.activeElement });
     modal.classList.add('activo');
     modal.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
     modal.addEventListener('keydown', manejarTeclasModal);
-    const primerCampo = modal.querySelector('input:not([type=hidden]):not([type=date]), select, textarea, button:not(.modal-cerrar)');
-    if (primerCampo) setTimeout(() => primerCampo.focus({ preventScroll: true }), 60);
+    const destino = enfocar ?? modal.querySelector('input:not([type=hidden]), select, button:not([data-cerrar])');
+    if (destino) setTimeout(() => destino.focus({ preventScroll: true }), 60);
 }
+
 function cerrarModal(id) {
-    const modal = document.getElementById(id);
+    const modal = $(id);
+    if (!modal.classList.contains('activo')) return;
     modal.classList.remove('activo');
     modal.setAttribute('aria-hidden', 'true');
-    document.body.style.overflow = '';
     modal.removeEventListener('keydown', manejarTeclasModal);
-    if (focoPrevio && typeof focoPrevio.focus === 'function') focoPrevio.focus({ preventScroll: true });
+    const indice = modalesAbiertos.findIndex(m => m.id === id);
+    const [{ foco } = {}] = indice >= 0 ? modalesAbiertos.splice(indice, 1) : [];
+    if (modalesAbiertos.length === 0) document.body.style.overflow = '';
+    if (foco?.isConnected) foco.focus({ preventScroll: true });
+    if (id === 'modalConfirmar' && resolverConfirmacion) {
+        const resolver = resolverConfirmacion;
+        resolverConfirmacion = null;
+        resolver(false);
+    }
 }
+
 function manejarTeclasModal(e) {
     const modal = e.currentTarget;
-    if (e.key === 'Escape') { cerrarModal(modal.id); return; }
+    if (e.key === 'Escape') { e.stopPropagation(); cerrarModal(modal.id); return; }
     if (e.key !== 'Tab') return;
-    const enfocables = [...modal.querySelectorAll(
-        'a[href], button:not([disabled]), input:not([type=hidden]), select, textarea, [tabindex]:not([tabindex="-1"])'
-    )].filter(el => el.offsetParent !== null);
+    const enfocables = [...modal.querySelectorAll('button:not([disabled]), input:not([type=hidden]), select')]
+        .filter(el => el.offsetParent !== null);
     if (enfocables.length === 0) return;
     const primero = enfocables[0];
     const ultimo = enfocables[enfocables.length - 1];
@@ -382,244 +659,454 @@ function manejarTeclasModal(e) {
     else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primero.focus(); }
 }
 
-// ===== Modal Categoría =====
-function abrirModalCategoria(id) {
-    const form = document.getElementById('formCategoria');
-    form.reset();
-    renderizarSelectorEmojis();
-    if (id) {
-        const cat = obtenerCategoriaPorId(id);
-        if (!cat) return;
-        document.getElementById('tituloModalCategoria').textContent = 'Editar categoría';
-        document.getElementById('categoriaId').value          = cat.id;
-        document.getElementById('categoriaNombre').value      = cat.nombre;
-        document.getElementById('categoriaPresupuesto').value = cat.presupuesto;
-        seleccionarEmoji(cat.icono);
-    } else {
-        document.getElementById('tituloModalCategoria').textContent = 'Nueva categoría';
-        document.getElementById('categoriaId').value = '';
-        seleccionarEmoji(primerIcono());
+// ===== Diálogo de confirmación =====
+function configurarConfirmacion() {
+    $('confirmarCancelar').addEventListener('click', () => cerrarModal('modalConfirmar'));
+    $('confirmarAceptar').addEventListener('click', () => {
+        const resolver = resolverConfirmacion;
+        resolverConfirmacion = null;
+        cerrarModal('modalConfirmar');
+        resolver?.(true);
+    });
+}
+
+// Devuelve una promesa que resuelve true si el usuario acepta.
+function confirmar({ titulo, texto, aceptar = 'Aceptar', peligro = false, soloAceptar = false }) {
+    $('confirmarTitulo').textContent = titulo;
+    $('confirmarTexto').textContent = texto;
+    $('confirmarAceptar').textContent = aceptar;
+    $('confirmarAceptar').className = `btn ${peligro ? 'btn-peligro' : 'btn-primario'}`;
+    $('confirmarCancelar').hidden = soloAceptar;
+    return new Promise(resolver => {
+        resolverConfirmacion = resolver;
+        abrirModal('modalConfirmar', $(soloAceptar || !peligro ? 'confirmarAceptar' : 'confirmarCancelar'));
+    });
+}
+
+// ===== Avisos (toasts) =====
+function mostrarToast(mensaje, tipo = 'ok') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${tipo}`;
+    toast.innerHTML = `<i class="ph ${tipo === 'alerta' ? 'ph-warning-circle' : 'ph-check-circle'}" aria-hidden="true"></i><span></span>`;
+    toast.querySelector('span').textContent = mensaje;
+    $('toasts').appendChild(toast);
+    setTimeout(() => {
+        toast.classList.add('saliendo');
+        setTimeout(() => toast.remove(), 220);
+    }, 2400);
+}
+
+// Marca el campo inválido, lo enfoca y avisa.
+function errorEnCampo(campo, mensaje) {
+    campo.setAttribute('aria-invalid', 'true');
+    campo.focus();
+    campo.addEventListener('input', () => campo.removeAttribute('aria-invalid'), { once: true });
+    mostrarToast(mensaje, 'alerta');
+}
+
+// ===== Modal Movimiento =====
+const opcionesCuentas = () => obtenerCuentas()
+    .map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`)
+    .join('');
+
+// Sirve para movimientos y para recurrentes: con opciones.recurrenteId edita la plantilla.
+async function abrirModalMovimiento(id, tipoInicial = 'gasto', opciones = {}) {
+    if (obtenerCuentas().length === 0) {
+        const crear = await confirmar({
+            titulo: 'Primero creá una cuenta',
+            texto: 'Cada movimiento sale de una cuenta o entra en una: efectivo, banco, billetera virtual o tarjeta.',
+            aceptar: 'Crear cuenta'
+        });
+        if (crear) abrirModalCuenta();
+        return;
     }
-    abrirModal('modalCategoria');
+    const r = opciones.recurrenteId ? obtenerRecurrentePorId(opciones.recurrenteId) : null;
+    if (opciones.recurrenteId && !r) return;
+    const m = r ?? (id ? obtenerMovimientoPorId(id) : null);
+    if (id && !m) return;
+    $('formMovimiento').reset();
+    $('formMovimiento').querySelectorAll('[aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
+    $('movimientoCuenta').innerHTML = opcionesCuentas();
+    $('movimientoCuentaDestino').innerHTML = opcionesCuentas();
+    seleccionarTipo(m ? m.tipo : tipoInicial);
+    $('btnEliminarMovimiento').hidden = !m;
+    $('recurrenteId').value = r?.id ?? '';
+    // Repetir solo se elige al crear; un recurrente existente no puede dejar de serlo desde acá.
+    $('movimientoRepetir').innerHTML = (r ? '' : '<option value="">No se repite</option>') +
+        '<option value="mensual">Cada mes</option><option value="semanal">Cada semana</option>';
+    $('movimientoRepetir').value = r?.frecuencia ?? opciones.repetir ?? '';
+    $('campoRepetir').hidden = Boolean(m && !r);
+    $('etiquetaFecha').textContent = r ? 'Próxima fecha' : 'Fecha';
+    if (m) {
+        $('tituloModalMovimiento').textContent = r ? 'Editar recurrente' : 'Editar movimiento';
+        $('movimientoId').value          = r ? '' : m.id;
+        $('movimientoDescripcion').value = m.descripcion;
+        $('movimientoMonto').value       = m.monto;
+        $('movimientoFecha').value       = r ? proximaFecha(r) : m.fecha;
+        if (obtenerCuentaPorId(m.cuentaId)) $('movimientoCuenta').value = m.cuentaId;
+        if (m.cuentaDestinoId && obtenerCuentaPorId(m.cuentaDestinoId)) $('movimientoCuentaDestino').value = m.cuentaDestinoId;
+        if (m.categoriaId && obtenerCategoriaPorId(m.categoriaId)) $('movimientoCategoria').value = m.categoriaId;
+    } else {
+        $('tituloModalMovimiento').textContent = opciones.repetir ? 'Nuevo recurrente' : 'Nuevo movimiento';
+        $('movimientoId').value    = '';
+        $('movimientoFecha').value = fechaHoy();
+        const cuentas = obtenerCuentas();
+        if (cuentas[1]) $('movimientoCuentaDestino').value = cuentas[1].id;
+    }
+    ajustarAnchoMonto();
+    abrirModal('modalMovimiento', $('movimientoMonto'));
 }
-function renderizarSelectorEmojis() {
-    const cont = document.getElementById('selectorEmojis');
-    cont.innerHTML = obtenerGruposIconos().map(g => `
-        <div class="emoji-grupo">
-            <p class="emoji-grupo-titulo">${g.grupo}</p>
-            <div class="emoji-grupo-grid">
-                ${g.iconos.map(e => `
-                    <button type="button" class="emoji-btn" data-emoji="${e}" role="radio" aria-checked="false" aria-label="Ícono ${e}">${e}</button>
-                `).join('')}
-            </div>
-        </div>
-    `).join('');
-    cont.querySelectorAll('.emoji-btn').forEach(btn => {
-        btn.addEventListener('click', () => seleccionarEmoji(btn.dataset.emoji));
-    });
+
+function cargarSelectCategorias(tipo) {
+    const select = $('movimientoCategoria');
+    const previa = select.value;
+    const opciones = obtenerCategorias(tipo)
+        .map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`)
+        .join('');
+    select.innerHTML = '<option value="">Sin categoría</option>' + opciones;
+    if (obtenerCategoriaPorId(previa)?.tipo === tipo) select.value = previa;
 }
-function seleccionarEmoji(emoji) {
-    document.getElementById('categoriaIcono').value = emoji;
-    document.querySelectorAll('#selectorEmojis .emoji-btn').forEach(btn => {
-        const activa = btn.dataset.emoji === emoji;
+
+function seleccionarTipo(tipo) {
+    const esTransferencia = tipo === 'transferencia';
+    $('movimientoTipo').value = tipo;
+    document.querySelectorAll('.segmento').forEach(btn => {
+        const activa = btn.dataset.tipo === tipo;
         btn.classList.toggle('activa', activa);
-        btn.setAttribute('aria-checked', activa ? 'true' : 'false');
+        btn.setAttribute('aria-pressed', String(activa));
+    });
+    $('etiquetaCuenta').textContent = esTransferencia ? 'Desde' : 'Cuenta';
+    $('campoCuentaDestino').hidden = !esTransferencia;
+    $('campoCategoria').hidden = esTransferencia;
+    $('movimientoDescripcion').placeholder = esTransferencia ? 'Transferencia (opcional)' : 'Ej: Supermercado';
+    if (!esTransferencia) cargarSelectCategorias(tipo);
+}
+
+// El campo de monto crece con lo que se escribe, así el "$" queda pegado a la cifra.
+function ajustarAnchoMonto() {
+    const input = $('movimientoMonto');
+    const largo = (input.value || input.placeholder).length;
+    input.style.width = `${largo + 0.6}ch`;
+}
+
+function configurarFormularioMovimiento() {
+    $('movimientoMonto').addEventListener('input', ajustarAnchoMonto);
+    document.querySelectorAll('.segmento').forEach(btn => {
+        btn.addEventListener('click', () => seleccionarTipo(btn.dataset.tipo));
+    });
+    $('formMovimiento').addEventListener('submit', e => {
+        e.preventDefault();
+        const id              = $('movimientoId').value;
+        const tipo            = $('movimientoTipo').value;
+        const descripcion     = $('movimientoDescripcion').value;
+        const monto           = Number($('movimientoMonto').value);
+        const cuentaId        = $('movimientoCuenta').value;
+        const cuentaDestinoId = $('movimientoCuentaDestino').value;
+        const categoriaId     = $('movimientoCategoria').value;
+        const fecha           = $('movimientoFecha').value;
+        const recurrenteId    = $('recurrenteId').value;
+        const repetir         = $('movimientoRepetir').value;
+        const esTransferencia = tipo === 'transferencia';
+        if (!(monto > 0)) return errorEnCampo($('movimientoMonto'), 'Ingresá un monto mayor a cero');
+        if (!esTransferencia && !descripcion.trim()) return errorEnCampo($('movimientoDescripcion'), 'Escribí una descripción');
+        if (!obtenerCuentaPorId(cuentaId)) return errorEnCampo($('movimientoCuenta'), 'Elegí una cuenta');
+        if (esTransferencia && (!obtenerCuentaPorId(cuentaDestinoId) || cuentaDestinoId === cuentaId)) {
+            return errorEnCampo($('movimientoCuentaDestino'), obtenerCuentas().length < 2
+                ? 'Necesitás al menos dos cuentas para transferir'
+                : 'Elegí una cuenta de destino distinta a la de origen');
+        }
+        if (!esFechaISO(fecha)) return errorEnCampo($('movimientoFecha'), 'Elegí una fecha válida');
+
+        const datos = { descripcion, monto, tipo, fecha, cuentaId, cuentaDestinoId, categoriaId };
+        if (recurrenteId) {
+            try {
+                editarRecurrente(recurrenteId, datos, repetir);
+            } catch (error) {
+                return errorEnCampo($('movimientoFecha'), error.message);
+            }
+            mostrarToast('Recurrente actualizado');
+        } else if (repetir) {
+            const antes = obtenerMovimientos().length;
+            crearRecurrente(datos, repetir);
+            const registrados = obtenerMovimientos().length - antes;
+            mostrarToast(registrados > 1
+                ? `Recurrente creado · ${registrados} movimientos registrados`
+                : 'Recurrente creado: se registra solo');
+        } else if (id) {
+            editarMovimiento(id, datos);
+            mostrarToast('Movimiento actualizado');
+        } else {
+            crearMovimiento(datos);
+            mostrarToast(esTransferencia ? 'Transferencia registrada' : 'Movimiento registrado');
+        }
+        cerrarModal('modalMovimiento');
+        renderizarTodo();
+    });
+    $('btnEliminarMovimiento').addEventListener('click', async () => {
+        const id = $('movimientoId').value;
+        const recurrenteId = $('recurrenteId').value;
+        if (recurrenteId) {
+            const ok = await confirmar({
+                titulo: '¿Eliminar recurrente?',
+                texto: 'Deja de registrarse. Los movimientos que ya se registraron se conservan.',
+                aceptar: 'Eliminar',
+                peligro: true
+            });
+            if (!ok) return;
+            eliminarRecurrente(recurrenteId);
+            cerrarModal('modalMovimiento');
+            mostrarToast('Recurrente eliminado');
+            return renderizarTodo();
+        }
+        const ok = await confirmar({
+            titulo: '¿Eliminar movimiento?',
+            texto: 'Esta acción no se puede deshacer.',
+            aceptar: 'Eliminar',
+            peligro: true
+        });
+        if (!ok) return;
+        eliminarMovimiento(id);
+        cerrarModal('modalMovimiento');
+        mostrarToast('Movimiento eliminado');
+        renderizarTodo();
     });
 }
-function configurarFormularioCategoria() {
-    document.getElementById('formCategoria').addEventListener('submit', e => {
+
+// ===== Modal Cuenta =====
+function abrirModalCuenta(id) {
+    const cuenta = id ? obtenerCuentaPorId(id) : null;
+    if (id && !cuenta) return;
+    $('formCuenta').reset();
+    $('cuentaTipo').innerHTML = Object.entries(TIPOS_CUENTA)
+        .map(([clave, t]) => `<option value="${clave}">${t.nombre}</option>`)
+        .join('');
+    $('btnEliminarCuenta').hidden = !cuenta;
+    $('tituloModalCuenta').textContent = cuenta ? 'Editar cuenta' : 'Nueva cuenta';
+    $('cuentaId').value           = cuenta?.id ?? '';
+    $('cuentaNombre').value       = cuenta?.nombre ?? '';
+    $('cuentaTipo').value         = cuenta?.tipo ?? 'banco';
+    $('cuentaSaldoInicial').value = cuenta?.saldoInicial ?? 0;
+    abrirModal('modalCuenta');
+}
+
+function configurarFormularioCuenta() {
+    $('btnNuevaCuenta').addEventListener('click', () => abrirModalCuenta());
+    $('formCuenta').addEventListener('submit', e => {
         e.preventDefault();
-        const id           = document.getElementById('categoriaId').value;
-        const nombre       = document.getElementById('categoriaNombre').value;
-        const icono        = document.getElementById('categoriaIcono').value;
-        const presupuesto  = document.getElementById('categoriaPresupuesto').value;
-        if (!icono) {
-            mostrarToast('Elegí un ícono para la categoría', 'alerta');
+        const id           = $('cuentaId').value;
+        const nombre       = $('cuentaNombre').value;
+        const tipo         = $('cuentaTipo').value;
+        const saldoInicial = Number($('cuentaSaldoInicial').value);
+        if (!nombre.trim()) return errorEnCampo($('cuentaNombre'), 'Escribí un nombre para la cuenta');
+        if (!Number.isFinite(saldoInicial)) return errorEnCampo($('cuentaSaldoInicial'), 'Ingresá un saldo inicial válido');
+        if (id) {
+            editarCuenta(id, { nombre, tipo, saldoInicial });
+            mostrarToast('Cuenta actualizada');
+        } else {
+            crearCuenta({ nombre, tipo, saldoInicial });
+            mostrarToast('Cuenta creada');
+        }
+        cerrarModal('modalCuenta');
+        renderizarTodo();
+    });
+    $('btnEliminarCuenta').addEventListener('click', async () => {
+        const id = $('cuentaId').value;
+        const usos = contarMovimientosDeCuenta(id);
+        const fijos = contarRecurrentesDeCuenta(id);
+        if (usos > 0 || fijos > 0) {
+            const partes = [
+                usos ? `${usos} ${usos === 1 ? 'movimiento' : 'movimientos'}` : '',
+                fijos ? `${fijos} ${fijos === 1 ? 'recurrente' : 'recurrentes'}` : ''
+            ].filter(Boolean).join(' y ');
+            await confirmar({
+                titulo: 'No se puede eliminar',
+                texto: `La cuenta tiene ${partes}. Eliminalos o pasalos a otra cuenta primero.`,
+                aceptar: 'Entendido',
+                soloAceptar: true
+            });
             return;
         }
+        const ok = await confirmar({
+            titulo: '¿Eliminar cuenta?',
+            texto: 'Esta acción no se puede deshacer.',
+            aceptar: 'Eliminar',
+            peligro: true
+        });
+        if (!ok || !eliminarCuenta(id)) return;
+        cerrarModal('modalCuenta');
+        mostrarToast('Cuenta eliminada');
+        renderizarTodo();
+    });
+}
+
+// ===== Modal Categoría =====
+const nombreIcono = icono => icono.replace(/^ph-/, '').replaceAll('-', ' ');
+
+function abrirModalCategoria(id) {
+    const cat = id ? obtenerCategoriaPorId(id) : null;
+    if (id && !cat) return;
+    const tipo = cat ? cat.tipo : tipoCategoriaActual;
+    const deTipo = tipo === 'ingreso' ? 'de ingreso' : 'de gasto';
+    $('formCategoria').reset();
+    $('btnEliminarCategoria').hidden = !cat;
+    $('tituloModalCategoria').textContent = `${cat ? 'Editar' : 'Nueva'} categoría ${deTipo}`;
+    $('categoriaTipo').value = tipo;
+    $('categoriaId').value = cat?.id ?? '';
+    $('categoriaNombre').value = cat?.nombre ?? '';
+    $('categoriaPresupuesto').value = cat?.presupuesto ?? '';
+    $('campoPresupuesto').hidden = tipo === 'ingreso';
+
+    $('selectorColores').innerHTML = COLORES_CATEGORIA.map(color => `
+        <button class="color-btn tono-${color}" type="button" data-color="${color}" aria-pressed="false" aria-label="${NOMBRES_COLOR[color]}"></button>
+    `).join('');
+    $('selectorIconos').innerHTML = obtenerGruposIconos().flatMap(g => g.iconos).map(icono => `
+        <button class="icono-btn" type="button" data-icono="${esc(icono)}" aria-pressed="false" aria-label="${esc(nombreIcono(icono))}"><i class="ph ${esc(icono)}" aria-hidden="true"></i></button>
+    `).join('');
+
+    const colorPorDefecto = COLORES_CATEGORIA[obtenerCategorias().length % COLORES_CATEGORIA.length];
+    seleccionarColor(cat?.color ?? colorPorDefecto);
+    seleccionarIcono(cat?.icono ?? primerIcono());
+    abrirModal('modalCategoria', $('categoriaNombre'));
+}
+
+function marcarEnGrupo(contenedor, atributo, valor) {
+    contenedor.querySelectorAll(`[data-${atributo}]`).forEach(btn => {
+        const activa = btn.getAttribute(`data-${atributo}`) === valor;
+        btn.classList.toggle('activa', activa);
+        btn.setAttribute('aria-pressed', String(activa));
+    });
+}
+
+function seleccionarColor(color) {
+    $('categoriaColor').value = color;
+    $('vistaCategoria').className = `icono-tile grande tono-${color}`;
+    marcarEnGrupo($('selectorColores'), 'color', color);
+}
+
+function seleccionarIcono(icono) {
+    $('categoriaIcono').value = icono;
+    $('vistaCategoria').innerHTML = `<i class="ph ${esc(icono)}" aria-hidden="true"></i>`;
+    marcarEnGrupo($('selectorIconos'), 'icono', icono);
+}
+
+function configurarFormularioCategoria() {
+    $('btnNuevaCategoria').addEventListener('click', () => abrirModalCategoria());
+    $('selectorColores').addEventListener('click', e => {
+        const btn = e.target.closest('[data-color]');
+        if (btn) seleccionarColor(btn.dataset.color);
+    });
+    $('selectorIconos').addEventListener('click', e => {
+        const btn = e.target.closest('[data-icono]');
+        if (btn) seleccionarIcono(btn.dataset.icono);
+    });
+    $('formCategoria').addEventListener('submit', e => {
+        e.preventDefault();
+        const id          = $('categoriaId').value;
+        const tipo        = $('categoriaTipo').value;
+        const nombre      = $('categoriaNombre').value;
+        const icono       = $('categoriaIcono').value;
+        const color       = $('categoriaColor').value;
+        const presupuesto = tipo === 'gasto' ? Number($('categoriaPresupuesto').value || 0) : 0;
+        if (!nombre.trim()) return errorEnCampo($('categoriaNombre'), 'Escribí un nombre para la categoría');
+        if (!Number.isFinite(presupuesto) || presupuesto < 0) return errorEnCampo($('categoriaPresupuesto'), 'Ingresá un presupuesto válido');
         if (id) {
-            editarCategoria(id, { nombre, icono, presupuesto });
+            editarCategoria(id, { nombre, icono, color, presupuesto });
             mostrarToast('Categoría actualizada');
         } else {
-            crearCategoria({ nombre, icono, presupuesto });
+            crearCategoria({ nombre, icono, color, presupuesto, tipo });
             mostrarToast('Categoría creada');
         }
         cerrarModal('modalCategoria');
         renderizarTodo();
     });
-}
-function confirmarEliminarCategoria(id) {
-    Swal.fire(opcionesSwal({
-        title: '¿Eliminar categoría?',
-        text: 'Se eliminarán también los movimientos asociados a esta categoría.',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Sí, eliminar',
-        cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#FF5C5C',
-        cancelButtonColor: '#6B7280'
-    })).then(resultado => {
-        if (resultado.isConfirmed) {
-            eliminarCategoria(id);
-            mostrarToast('Categoría eliminada');
-            renderizarTodo();
-        }
-    });
-}
-
-// ===== Modal Movimiento =====
-function abrirModalMovimiento(id) {
-    const form = document.getElementById('formMovimiento');
-    form.reset();
-    cargarSelectCategorias();
-    if (obtenerCategorias().length === 0) {
-        Swal.fire(opcionesSwal({
-            title: 'Sin categorías',
-            text: 'Primero creá al menos una categoría para poder registrar movimientos.',
-            icon: 'info',
-            confirmButtonColor: '#6C5CE7'
-        }));
-        return;
-    }
-    if (id) {
-        const m = obtenerMovimientoPorId(id);
-        if (!m) return;
-        document.getElementById('tituloModalMovimiento').textContent = 'Editar movimiento';
-        document.getElementById('movimientoId').value          = m.id;
-        document.getElementById('movimientoDescripcion').value = m.descripcion;
-        document.getElementById('movimientoMonto').value       = m.monto;
-        document.getElementById('movimientoCategoria').value   = m.categoriaId;
-        document.getElementById('movimientoFecha').value       = aFechaInput(m.fecha);
-        seleccionarTipo(m.tipo);
-    } else {
-        document.getElementById('tituloModalMovimiento').textContent = 'Nuevo movimiento';
-        document.getElementById('movimientoId').value    = '';
-        document.getElementById('movimientoFecha').value = aFechaInput(Date.now());
-        seleccionarTipo('gasto');
-    }
-    abrirModal('modalMovimiento');
-}
-function cargarSelectCategorias() {
-    const sel = document.getElementById('movimientoCategoria');
-    sel.innerHTML = obtenerCategorias()
-        .map(c => `<option value="${c.id}">${c.icono} ${c.nombre}</option>`)
-        .join('');
-}
-function seleccionarTipo(tipo) {
-    document.getElementById('movimientoTipo').value = tipo;
-    document.querySelectorAll('.toggle-btn').forEach(btn => {
-        btn.classList.toggle('activa', btn.dataset.tipo === tipo);
-    });
-}
-function configurarFormularioMovimiento() {
-    document.querySelectorAll('.toggle-btn').forEach(btn => {
-        btn.addEventListener('click', () => seleccionarTipo(btn.dataset.tipo));
-    });
-    document.getElementById('formMovimiento').addEventListener('submit', e => {
-        e.preventDefault();
-        const id          = document.getElementById('movimientoId').value;
-        const descripcion = document.getElementById('movimientoDescripcion').value;
-        const monto       = document.getElementById('movimientoMonto').value;
-        const categoriaId = document.getElementById('movimientoCategoria').value;
-        const tipo        = document.getElementById('movimientoTipo').value;
-        const fechaStr    = document.getElementById('movimientoFecha').value;
-        const fecha       = new Date(fechaStr).getTime();
-        if (id) {
-            editarMovimiento(id, { descripcion, monto, categoriaId, tipo, fecha });
-            mostrarToast('Movimiento actualizado');
-        } else {
-            crearMovimiento({ descripcion, monto, categoriaId, tipo, fecha });
-            mostrarToast('Movimiento creado');
-        }
-        cerrarModal('modalMovimiento');
+    $('btnEliminarCategoria').addEventListener('click', async () => {
+        const id = $('categoriaId').value;
+        const ok = await confirmar({
+            titulo: '¿Eliminar categoría?',
+            texto: 'Sus movimientos se conservan y quedan como "Sin categoría".',
+            aceptar: 'Eliminar',
+            peligro: true
+        });
+        if (!ok) return;
+        eliminarCategoria(id);
+        cerrarModal('modalCategoria');
+        mostrarToast('Categoría eliminada');
         renderizarTodo();
     });
 }
-function confirmarEliminarMovimiento(id) {
-    Swal.fire(opcionesSwal({
-        title: '¿Eliminar movimiento?',
-        text: 'Esta acción no se puede deshacer.',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Sí, eliminar',
-        cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#FF5C5C',
-        cancelButtonColor: '#6B7280'
-    })).then(resultado => {
-        if (resultado.isConfirmed) {
-            eliminarMovimiento(id);
-            mostrarToast('Movimiento eliminado');
-            renderizarTodo();
-        }
+
+// ===== Ajustes: datos de ejemplo, exportación y respaldo =====
+function descargar(nombre, contenido, tipo) {
+    const url = URL.createObjectURL(new Blob([contenido], { type: tipo }));
+    const enlace = Object.assign(document.createElement('a'), { href: url, download: nombre });
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function cargarEjemplo() {
+    if (hayMovimientos()) {
+        const ok = await confirmar({
+            titulo: '¿Reemplazar tus datos?',
+            texto: 'Los datos de ejemplo reemplazan tus cuentas, categorías y movimientos actuales.',
+            aceptar: 'Reemplazar',
+            peligro: true
+        });
+        if (!ok) return;
+    }
+    await cargarDatosDeEjemplo();
+    periodo = periodoActual();
+    renderizarTodo();
+    irASeccion('inicio');
+    mostrarToast('Datos de ejemplo cargados');
+}
+
+function configurarAjustes() {
+    $('btnExportarCSV').addEventListener('click', () => {
+        if (!hayMovimientos()) return mostrarToast('Todavía no hay movimientos para exportar', 'alerta');
+        // El BOM hace que Excel reconozca los acentos.
+        descargar(`walletera-movimientos-${fechaHoy()}.csv`, `\ufeff${exportarCSV()}`, 'text/csv;charset=utf-8');
     });
-}
-
-// ===== Fondo mensual =====
-function editarFondoMensual() {
-    Swal.fire(opcionesSwal({
-        title: 'Definir fondo mensual',
-        input: 'number',
-        inputLabel: 'Monto disponible para este mes',
-        inputValue: obtenerFondoMensual(),
-        inputAttributes: { min: 0, step: 100 },
-        showCancelButton: true,
-        confirmButtonText: 'Guardar',
-        cancelButtonText: 'Cancelar',
-        confirmButtonColor: '#6C5CE7',
-        inputValidator: valor => {
-            if (!valor || Number(valor) < 0) return 'Ingresá un monto válido';
-        }
-    })).then(resultado => {
-        if (resultado.isConfirmed) {
-            setearFondoMensual(resultado.value);
-            mostrarToast('Fondo mensual actualizado');
-            renderizarTodo();
-        }
+    $('btnDescargarRespaldo').addEventListener('click', () => {
+        descargar(`walletera-respaldo-${fechaHoy()}.json`, JSON.stringify(exportarRespaldo(), null, 2), 'application/json');
+        mostrarToast('Respaldo descargado');
     });
-}
-
-// ===== SweetAlert2 con tema Walletera =====
-function opcionesSwal(opciones) {
-    return {
-        ...opciones,
-        customClass: {
-            popup: 'swal-walletera',
-            confirmButton: 'swal-btn-confirmar',
-            cancelButton: 'swal-btn-cancelar'
+    $('btnRestaurarRespaldo').addEventListener('click', () => $('archivoRespaldo').click());
+    $('archivoRespaldo').addEventListener('change', async e => {
+        const archivo = e.target.files[0];
+        e.target.value = '';
+        if (!archivo) return;
+        let datos;
+        try {
+            datos = validarRespaldo(JSON.parse(await archivo.text()));
+        } catch (error) {
+            return mostrarToast(error instanceof SyntaxError ? 'El archivo no es un JSON válido' : error.message, 'alerta');
         }
-    };
-}
-
-// ===== Toast (Toastify) =====
-function mostrarToast(mensaje, tipo) {
-    const estilos = getComputedStyle(document.documentElement);
-    const colores = {
-        ok: estilos.getPropertyValue('--marca').trim(),
-        alerta: estilos.getPropertyValue('--alerta').trim(),
-        peligro: estilos.getPropertyValue('--peligro').trim()
-    };
-    Toastify({
-        text: mensaje,
-        duration: 2400,
-        gravity: 'top',
-        position: 'right',
-        stopOnFocus: true,
-        style: {
-            background: colores[tipo] || colores.ok,
-            color: '#fff',
-            borderRadius: '12px',
-            fontFamily: 'Manrope, sans-serif',
-            fontWeight: '700',
-            boxShadow: 'none'
-        }
-    }).showToast();
-}
-
-// ===== Helpers =====
-function aFechaInput(timestamp) {
-    const d = new Date(timestamp);
-    const yyyy = d.getFullYear();
-    const mm   = String(d.getMonth() + 1).padStart(2, '0');
-    const dd   = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
+        const resumen = `${datos.cuentas.length} cuentas, ${datos.categorias.length} categorías y ${datos.movimientos.length} movimientos`;
+        const ok = await confirmar({
+            titulo: '¿Restaurar este respaldo?',
+            texto: `Se cargan ${resumen}${datos.descartados ? ` (${datos.descartados} movimientos inválidos se omiten)` : ''}. Tus datos actuales se reemplazan.`,
+            aceptar: 'Restaurar',
+            peligro: true
+        });
+        if (!ok) return;
+        reemplazarDatos(datos);
+        periodo = periodoActual();
+        renderizarTodo();
+        mostrarToast('Respaldo restaurado');
+    });
+    $('btnBorrarTodo').addEventListener('click', async () => {
+        const ok = await confirmar({
+            titulo: '¿Borrar todos los datos?',
+            texto: 'Se eliminan tus cuentas, categorías y movimientos de este navegador. Si querés conservarlos, descargá un respaldo antes.',
+            aceptar: 'Borrar todo',
+            peligro: true
+        });
+        if (!ok) return;
+        await reiniciarDatos();
+        periodo = periodoActual();
+        renderizarTodo();
+        mostrarToast('Datos borrados');
+    });
 }

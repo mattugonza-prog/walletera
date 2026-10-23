@@ -2,7 +2,7 @@
 
 Billetera personal para ordenar tu plata: cuentas, transferencias, presupuestos por categoría y un análisis mensual de ingresos y gastos. Funciona en el navegador, sin registro y sin conexión.
 
-Para explorarla sin cargar nada a mano: en Ajustes, "Cargar datos de ejemplo" llena la app con tres meses de movimientos.
+**[Probar la demo → walletera.vercel.app](https://walletera.vercel.app/)** · Para explorarla sin cargar nada a mano: en Ajustes, "Cargar datos de ejemplo" llena la app con tres meses de movimientos.
 
 ![CI](https://github.com/mattugonza-prog/walletera/actions/workflows/ci.yml/badge.svg)
 

@@ -274,7 +274,12 @@ h2 { font-size: 17px; }
 
 /* ===== Encabezado de sección ===== */
 .encabezado { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.encabezado h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .encabezado-acciones { display: flex; gap: 8px; }
+@media (max-width: 380px) {
+    .encabezado-acciones { gap: 6px; }
+    .encabezado-acciones .btn-icono { width: 40px; height: 40px; }
+}
 .btn-icono {
     width: 44px; height: 44px; flex-shrink: 0;
     display: grid; place-items: center;
@@ -319,6 +324,27 @@ h2 { font-size: 17px; }
 .periodo-btn i { font-size: 18px; }
 .periodo-btn:disabled { color: var(--borde-fuerte); cursor: default; }
 @media (hover: hover) { .periodo-btn:hover:not(:disabled) { background: var(--superficie-2); } }
+
+/* Rango de fechas en Movimientos: el nombre del mes abre el panel para elegir fechas
+   y, con un rango activo, una pastilla lo reemplaza (tocarla permite cambiarlo). */
+.periodo-elegir, .rango-editar {
+    display: inline-flex; align-items: center; gap: 8px; min-width: 0;
+    height: 40px; padding: 0 12px; border-radius: var(--radio-sm);
+    color: var(--tinta); transition: background var(--rapida) ease;
+}
+.periodo-elegir i { font-size: 16px; color: var(--tinta-suave); }
+.periodo-elegir .periodo-nombre { display: inline-block; }
+.panel-rango { display: flex; flex-direction: column; gap: 14px; }
+.panel-rango .chips { margin: 0; padding: 0; flex-wrap: wrap; }
+.rango-activo {
+    display: flex; align-items: center; gap: 4px;
+    background: var(--superficie); border: 1px solid var(--borde);
+    border-radius: var(--radio-md); padding: 4px;
+}
+.rango-editar { flex: 1; text-align: left; }
+.rango-editar i { font-size: 18px; color: var(--acento-tinta); }
+.rango-texto { min-width: 0; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (hover: hover) { .periodo-elegir:hover, .rango-editar:hover { background: var(--superficie-2); } }
 
 .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -20px; padding: 0 20px; }
 .chips::-webkit-scrollbar { display: none; }
@@ -447,10 +473,13 @@ h2 { font-size: 17px; }
 .btn-secundario { background: var(--superficie-2); color: var(--tinta); }
 .btn-peligro { background: var(--negativo); color: var(--fondo); }
 .btn-peligro-texto { color: var(--negativo); padding: 0 12px; margin-right: auto; }
+.btn-texto { color: var(--tinta-media); padding: 0 12px; margin-right: auto; }
+.btn[aria-busy="true"], .fila[aria-busy="true"] { opacity: 0.6; cursor: progress; }
 @media (hover: hover) {
     .btn-primario:hover { opacity: 0.9; }
     .btn-secundario:hover { background: var(--borde-fuerte); }
     .btn-peligro-texto:hover { background: color-mix(in srgb, var(--negativo) 12%, transparent); }
+    .btn-texto:hover { background: var(--superficie-2); }
 }
 
 /* ===== Modales: hoja inferior en móvil, diálogo en escritorio ===== */
@@ -480,6 +509,8 @@ h2 { font-size: 17px; }
     animation: aparecerDialogo var(--media) var(--salida);
 }
 .modal-dialogo h2 { font-size: 19px; }
+.opciones-descarga { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.opciones-descarga .fila { border-radius: var(--radio-sm); }
 .modal-dialogo p { font-size: 15px; margin-bottom: 12px; }
 @keyframes aparecerDialogo { from { transform: scale(0.96); opacity: 0; } to { transform: none; opacity: 1; } }
 

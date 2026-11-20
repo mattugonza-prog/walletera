@@ -158,16 +158,54 @@
                     <button class="btn-icono" type="button" id="btnBuscar" aria-label="Buscar" aria-expanded="false" aria-controls="campoBuscar">
                         <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
                     </button>
+                    <button class="btn-icono" type="button" id="btnDescargar" aria-label="Descargar en Excel o PDF">
+                        <i class="ph ph-download-simple" aria-hidden="true"></i>
+                    </button>
                 </div>
             </header>
             <label class="buscador" id="campoBuscar" hidden>
                 <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
                 <input type="search" id="buscador" placeholder="Buscar por descripción" aria-label="Buscar movimientos">
             </label>
-            <div class="periodo" role="group" aria-label="Período">
+            <section class="tarjeta panel-rango" id="panelRango" aria-labelledby="tituloRango" hidden>
+                <h2 class="visualmente-oculto" id="tituloRango">Elegir fechas</h2>
+                <div class="dos-columnas">
+                    <label class="campo">
+                        <span>Desde</span>
+                        <input type="date" id="rangoDesde">
+                    </label>
+                    <label class="campo">
+                        <span>Hasta</span>
+                        <input type="date" id="rangoHasta">
+                    </label>
+                </div>
+                <div class="chips" role="group" aria-label="Atajos de fechas">
+                    <button class="chip" type="button" data-atajo="mes">Este mes</button>
+                    <button class="chip" type="button" data-atajo="mes-anterior">Mes anterior</button>
+                    <button class="chip" type="button" data-atajo="tres-meses">Últimos 3 meses</button>
+                    <button class="chip" type="button" data-atajo="anio">Este año</button>
+                </div>
+                <div class="formulario-acciones">
+                    <button class="btn btn-texto" type="button" id="btnQuitarRango">Volver al mes</button>
+                    <button class="btn btn-primario" type="button" id="btnAplicarRango">Ver movimientos</button>
+                </div>
+            </section>
+            <div class="periodo" id="periodoMovimientos" role="group" aria-label="Período">
                 <button class="periodo-btn" type="button" data-periodo="-1" aria-label="Mes anterior"><i class="ph ph-caret-left" aria-hidden="true"></i></button>
-                <span class="periodo-nombre" data-periodo-nombre aria-live="polite"></span>
+                <button class="periodo-elegir" type="button" id="btnRango" aria-expanded="false" aria-controls="panelRango">
+                    <span class="periodo-nombre" data-periodo-nombre aria-live="polite"></span>
+                    <span class="visualmente-oculto">. Elegir fechas</span>
+                    <i class="ph ph-calendar-dots" aria-hidden="true"></i>
+                </button>
                 <button class="periodo-btn" type="button" data-periodo="1" aria-label="Mes siguiente"><i class="ph ph-caret-right" aria-hidden="true"></i></button>
+            </div>
+            <div class="rango-activo" id="rangoActivo" hidden>
+                <button class="rango-editar" type="button" id="btnEditarRango" aria-expanded="false" aria-controls="panelRango">
+                    <i class="ph ph-calendar-dots" aria-hidden="true"></i>
+                    <span class="rango-texto" id="rangoTexto" aria-live="polite"></span>
+                    <span class="visualmente-oculto">. Cambiar fechas</span>
+                </button>
+                <button class="periodo-btn" type="button" id="btnLimpiarRango" aria-label="Quitar las fechas y volver al mes"><i class="ph ph-x" aria-hidden="true"></i></button>
             </div>
             <div class="dos-columnas">
                 <div class="tarjeta dato"><span class="dato-label">Ingresos</span><span class="dato-valor positivo monto" id="movIngresos"></span></div>
@@ -289,7 +327,7 @@
                     <li>
                         <button class="fila" type="button" id="btnExportarCSV">
                             <span class="icono-tile tono-azul"><i class="ph ph-file-csv" aria-hidden="true"></i></span>
-                            <span class="fila-texto"><span class="fila-nombre">Exportar movimientos</span><span class="fila-meta">CSV para Excel o Google Sheets</span></span>
+                            <span class="fila-texto"><span class="fila-nombre">Exportar todos los movimientos</span><span class="fila-meta">CSV para Excel o Google Sheets. Para un período, usá Descargar en Movimientos</span></span>
                         </button>
                     </li>
                     <li>
@@ -453,6 +491,28 @@
                 <button class="btn btn-primario" type="submit">Guardar</button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- ===== Descargar movimientos ===== -->
+<div class="modal modal-dialogo" id="modalDescargar" aria-hidden="true">
+    <div class="modal-fondo" data-cerrar="modalDescargar"></div>
+    <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="tituloDescargar" aria-describedby="detalleDescargar">
+        <h2 id="tituloDescargar">Descargar movimientos</h2>
+        <p class="texto-suave" id="detalleDescargar"></p>
+        <div class="opciones-descarga">
+            <button class="fila" type="button" data-descargar="xlsx">
+                <span class="icono-tile tono-verde"><i class="ph ph-file-xls" aria-hidden="true"></i></span>
+                <span class="fila-texto"><span class="fila-nombre">Excel (.xlsx)</span><span class="fila-meta">Para ordenar, filtrar y sumar</span></span>
+            </button>
+            <button class="fila" type="button" data-descargar="pdf">
+                <span class="icono-tile tono-rosa"><i class="ph ph-file-pdf" aria-hidden="true"></i></span>
+                <span class="fila-texto"><span class="fila-nombre">PDF</span><span class="fila-meta">Para imprimir o compartir</span></span>
+            </button>
+        </div>
+        <div class="formulario-acciones">
+            <button class="btn btn-secundario" type="button" data-cerrar="modalDescargar">Cancelar</button>
+        </div>
     </div>
 </div>
 

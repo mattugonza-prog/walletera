@@ -4,7 +4,7 @@ import { generarDatosDeEjemplo } from './ejemplo.js';
 import {
     TIPOS_CUENTA, COLORES_CATEGORIA,
     generarId, redondearCentavos, pad, aFechaISO, desdeFechaISO, esFechaISO,
-    desplazarPeriodo, diasDelPeriodo, proximaFecha, ocurrenciasPendientes, aplicarEdicionRecurrente,
+    desplazarPeriodo, diasDelPeriodo, rangoDePeriodo, proximaFecha, ocurrenciasPendientes, aplicarEdicionRecurrente,
     presupuestoDe, conPresupuesto,
     normalizarCategoria, validarRespaldo
 } from './dominio.js';
@@ -257,15 +257,14 @@ function exportarCSV() {
         const t = String(valor);
         return /[";\r\n]/.test(t) ? `"${t.replaceAll('"', '""')}"` : t;
     };
-    const tipos = { gasto: 'Gasto', ingreso: 'Ingreso', transferencia: 'Transferencia' };
-    const filas = ordenarMovimientos(movimientos).map(m => [
-        m.fecha,
-        tipos[m.tipo],
-        texto(m.descripcion),
-        (m.tipo === 'gasto' ? -m.monto : m.monto).toFixed(2).replace('.', ','),
-        texto(obtenerCuentaPorId(m.cuentaId)?.nombre),
-        texto(m.cuentaDestinoId ? obtenerCuentaPorId(m.cuentaDestinoId)?.nombre : ''),
-        texto(m.categoriaId ? obtenerCategoriaPorId(m.categoriaId)?.nombre : '')
+    const filas = filasParaExportar(ordenarMovimientos(movimientos)).map(f => [
+        f.fecha,
+        f.tipoNombre,
+        texto(f.descripcion),
+        f.monto.toFixed(2).replace('.', ','),
+        texto(f.cuenta),
+        texto(f.cuentaDestino),
+        texto(f.categoria)
     ]);
     const encabezado = ['Fecha', 'Tipo', 'Descripción', 'Monto', 'Cuenta', 'Cuenta destino', 'Categoría'];
     return [encabezado, ...filas].map(fila => fila.map(celda).join(';')).join('\r\n');
@@ -535,9 +534,16 @@ function obtenerProximosVencimientos(dias = 30) {
         .filter(v => v.fecha <= limite);
 }
 
-function buscarYFiltrar(texto, tipo, periodo) {
+// Movimientos entre dos fechas 'AAAA-MM-DD' (inclusive), del más nuevo al más viejo.
+function obtenerMovimientosEntre({ desde, hasta }) {
+    return ordenarMovimientos(movimientos.filter(m => m.fecha >= desde && m.fecha <= hasta));
+}
+
+// `rango` es un período 'AAAA-MM' o un rango { desde, hasta }.
+function buscarYFiltrar(texto, tipo, rango) {
     const q = texto.trim().toLowerCase();
-    return obtenerMovimientos(periodo).filter(m =>
+    const lista = obtenerMovimientosEntre(typeof rango === 'string' ? rangoDePeriodo(rango) : rango);
+    return lista.filter(m =>
         (tipo === 'todos' || m.tipo === tipo) &&
         (!q || m.descripcion.toLowerCase().includes(q))
     );
@@ -550,6 +556,13 @@ function movimientosDelPeriodo(periodo) {
 }
 
 const sumar = lista => lista.reduce((acc, m) => redondearCentavos(acc + m.monto), 0);
+
+// Totales de una lista cualquiera (las transferencias no son ingreso ni gasto).
+function calcularTotales(lista) {
+    const ingresos = sumar(lista.filter(m => m.tipo === 'ingreso'));
+    const gastos = sumar(lista.filter(m => m.tipo === 'gasto'));
+    return { ingresos, gastos, resultado: redondearCentavos(ingresos - gastos), cantidad: lista.length };
+}
 
 function totalPorTipo(periodo, tipo) {
     return sumar(movimientosDelPeriodo(periodo).filter(m => m.tipo === tipo));
@@ -589,16 +602,51 @@ function calcularSerieMensual(periodoFin, meses = 6) {
     });
 }
 
-// Monto por categoría en el período. La clave null agrupa lo que no tiene categoría.
-function calcularMontoPorCategoria(tipo, periodo) {
+// Monto por categoría de una lista. La clave null agrupa lo que no tiene categoría.
+function sumarPorCategoria(lista, tipo) {
     const montos = new Map();
-    movimientosDelPeriodo(periodo)
+    lista
         .filter(m => m.tipo === tipo)
         .forEach(m => {
             const clave = m.categoriaId && obtenerCategoriaPorId(m.categoriaId) ? m.categoriaId : null;
             montos.set(clave, redondearCentavos((montos.get(clave) ?? 0) + m.monto));
         });
     return montos;
+}
+
+function calcularMontoPorCategoria(tipo, periodo) {
+    return sumarPorCategoria(movimientosDelPeriodo(periodo), tipo);
+}
+
+// Categorías de una lista con su monto y su parte del total, de mayor a menor.
+function resumenPorCategoria(lista, tipo = 'gasto') {
+    const montos = sumarPorCategoria(lista, tipo);
+    const total = [...montos.values()].reduce((acc, monto) => redondearCentavos(acc + monto), 0);
+    return [...montos]
+        .map(([id, monto]) => ({
+            nombre: id ? obtenerCategoriaPorId(id).nombre : 'Sin categoría',
+            monto,
+            porcentaje: total > 0 ? (monto / total) * 100 : 0
+        }))
+        .sort((a, b) => b.monto - a.monto);
+}
+
+// ===== Exportación =====
+// Filas planas para CSV, Excel y PDF. El monto lleva signo: los gastos van en negativo.
+const NOMBRES_TIPO = { gasto: 'Gasto', ingreso: 'Ingreso', transferencia: 'Transferencia' };
+
+function filasParaExportar(lista) {
+    const nombreCuenta = id => obtenerCuentaPorId(id)?.nombre ?? '';
+    return lista.map(m => ({
+        fecha: m.fecha,
+        tipo: m.tipo,
+        tipoNombre: NOMBRES_TIPO[m.tipo],
+        descripcion: m.descripcion,
+        categoria: m.categoriaId ? (obtenerCategoriaPorId(m.categoriaId)?.nombre ?? '') : '',
+        cuenta: nombreCuenta(m.cuentaId),
+        cuentaDestino: m.cuentaDestinoId ? nombreCuenta(m.cuentaDestinoId) : '',
+        monto: m.tipo === 'gasto' ? -m.monto : m.monto
+    }));
 }
 
 // Cada categoría con lo movido en el período y el presupuesto vigente ese mes.
@@ -675,10 +723,10 @@ export {
     contarMovimientosDeCuenta, contarRecurrentesDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
     obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria, presupuestoDe,
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
-    buscarYFiltrar, agruparPorDia,
+    obtenerMovimientosEntre, buscarYFiltrar, agruparPorDia, calcularTotales, resumenPorCategoria, filasParaExportar,
     obtenerRecurrentes, obtenerRecurrentePorId, crearRecurrente, editarRecurrente, eliminarRecurrente,
     obtenerProximosVencimientos, generarRecurrentes, proximaFecha,
-    periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
+    periodoActual, desplazarPeriodo, rangoDePeriodo, nombrePeriodo, fechaHoy, esFechaISO,
     calcularResumen, calcularPromedioDiario, calcularVariacionGastos, calcularSerieMensual,
     obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
     formatearMoneda, formatearFecha, etiquetaDia, etiquetaProxima,

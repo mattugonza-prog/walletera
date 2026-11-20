@@ -106,6 +106,11 @@ export function diasDelPeriodo(periodo) {
     return new Date(a, m, 0).getDate();
 }
 
+// Un mes como rango de fechas inclusivo: { desde: 'AAAA-MM-01', hasta: 'AAAA-MM-último' }.
+export function rangoDePeriodo(periodo) {
+    return { desde: `${periodo}-01`, hasta: `${periodo}-${pad(diasDelPeriodo(periodo))}` };
+}
+
 // ===== Recurrentes =====
 // Un recurrente es una plantilla de movimiento con frecuencia; "ultima" es la última fecha registrada.
 // Las mensuales mantienen el día de inicio y se ajustan al último día de los meses cortos.

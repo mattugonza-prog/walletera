@@ -8,22 +8,24 @@ import {
     contarMovimientosDeCuenta, contarRecurrentesDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
     obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria, presupuestoDe,
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
-    buscarYFiltrar, agruparPorDia,
+    obtenerMovimientosEntre, buscarYFiltrar, agruparPorDia, calcularTotales, resumenPorCategoria, filasParaExportar,
     obtenerRecurrentes, obtenerRecurrentePorId, crearRecurrente, editarRecurrente, eliminarRecurrente,
     obtenerProximosVencimientos, proximaFecha,
-    periodoActual, desplazarPeriodo, nombrePeriodo, fechaHoy, esFechaISO,
+    periodoActual, desplazarPeriodo, rangoDePeriodo, nombrePeriodo, fechaHoy, esFechaISO,
     calcularResumen, calcularPromedioDiario, calcularVariacionGastos, calcularSerieMensual,
     obtenerCategoriasConMonto, obtenerCategoriaMasGastada, obtenerDatosGrafico,
-    formatearMoneda, etiquetaDia, etiquetaProxima,
+    formatearMoneda, formatearFecha, etiquetaDia, etiquetaProxima,
     validarRespaldo, reemplazarDatos, exportarRespaldo, exportarCSV,
     cargarDatosDeEjemplo, reiniciarDatos, hayMovimientos
 } from './js/datos.js';
+import { descargarArchivo, descargarExcel, descargarPDF, ErrorDeCarga } from './js/exportar.js';
 
 // ===== Estado de UI =====
 let periodo = periodoActual();
 let filtroActual = 'todos';
 let busquedaActual = '';
 let tipoCategoriaActual = 'gasto';
+let rangoActual = null;   // { desde, hasta } elegido en Movimientos; null = el mes del selector
 let graficoCategorias = null;
 let graficoMensual = null;
 let resolverConfirmacion = null;
@@ -60,6 +62,8 @@ async function iniciar() {
     configurarFormularioCuenta();
     configurarFormularioCategoria();
     configurarBuscadorYFiltros();
+    configurarRango();
+    configurarDescargas();
     configurarAjustes();
     renderizarTodo();
     registrarServiceWorker();
@@ -367,18 +371,142 @@ function renderizarInicio() {
 }
 
 // ===== Movimientos =====
+// Se ven por mes (el selector) o entre dos fechas elegidas (rangoActual).
+const rangoMovimientos = () => rangoActual ?? rangoDePeriodo(periodo);
+
+function textoRango({ desde, hasta }) {
+    return desde === hasta ? `El ${formatearFecha(desde)}` : `Del ${formatearFecha(desde)} al ${formatearFecha(hasta)}`;
+}
+
+// Versión corta para la pastilla, que tiene que entrar en un celular angosto.
+const textoRangoCorto = ({ desde, hasta }) =>
+    (desde === hasta ? formatearFecha(desde) : `${formatearFecha(desde)} – ${formatearFecha(hasta)}`);
+
 function renderizarMovimientos() {
-    const resumen = calcularResumen(periodo);
-    $('movIngresos').textContent = formatearConSigno(resumen.ingresos);
-    $('movGastos').textContent = formatearMoneda(resumen.gastos);
-    const lista = buscarYFiltrar(busquedaActual, filtroActual, periodo);
+    const rango = rangoMovimientos();
+    const totales = calcularTotales(obtenerMovimientosEntre(rango));
+    $('movIngresos').textContent = formatearConSigno(totales.ingresos);
+    $('movGastos').textContent = formatearMoneda(totales.gastos);
+    $('periodoMovimientos').hidden = Boolean(rangoActual);
+    $('rangoActivo').hidden = !rangoActual;
+    if (rangoActual) $('rangoTexto').textContent = textoRangoCorto(rangoActual);
+
+    const lista = buscarYFiltrar(busquedaActual, filtroActual, rango);
     if (lista.length === 0) {
+        const donde = rangoActual ? 'rango' : 'mes';
         $('listaMovimientos').innerHTML = busquedaActual || filtroActual !== 'todos'
-            ? htmlVacio('ph-magnifying-glass', 'Sin resultados', 'Probá con otro texto, filtro o mes.')
-            : htmlVacio('ph-tray', `Sin movimientos en ${nombreMes(periodo)}`, 'Tocá + para registrar el primero.');
+            ? htmlVacio('ph-magnifying-glass', 'Sin resultados', `Probá con otro texto, filtro o ${donde}.`)
+            : rangoActual
+                ? htmlVacio('ph-tray', 'Sin movimientos entre esas fechas', 'Probá con otro rango.')
+                : htmlVacio('ph-tray', `Sin movimientos en ${nombreMes(periodo)}`, 'Tocá + para registrar el primero.');
         return;
     }
     $('listaMovimientos').innerHTML = htmlGrupos(lista);
+}
+
+// ===== Rango de fechas =====
+function rangoDeAtajo(atajo) {
+    const mes = periodoActual();
+    const anio = mes.slice(0, 4);
+    if (atajo === 'mes-anterior') return rangoDePeriodo(desplazarPeriodo(mes, -1));
+    if (atajo === 'tres-meses') return { desde: rangoDePeriodo(desplazarPeriodo(mes, -2)).desde, hasta: rangoDePeriodo(mes).hasta };
+    if (atajo === 'anio') return { desde: `${anio}-01-01`, hasta: `${anio}-12-31` };
+    return rangoDePeriodo(mes);
+}
+
+function alternarPanelRango(abrir = $('panelRango').hidden) {
+    $('panelRango').hidden = !abrir;
+    ['btnRango', 'btnEditarRango'].forEach(id => $(id).setAttribute('aria-expanded', String(abrir)));
+    if (!abrir) return;
+    const { desde, hasta } = rangoMovimientos();
+    $('rangoDesde').value = desde;
+    $('rangoHasta').value = hasta;
+    $('btnQuitarRango').hidden = !rangoActual;
+    $('rangoDesde').focus();
+}
+
+function aplicarRango(rango) {
+    rangoActual = rango;
+    alternarPanelRango(false);
+    renderizarMovimientos();
+}
+
+function configurarRango() {
+    $('btnRango').addEventListener('click', () => alternarPanelRango());
+    $('btnEditarRango').addEventListener('click', () => alternarPanelRango());
+    $('panelRango').addEventListener('click', e => {
+        const atajo = e.target.closest('[data-atajo]');
+        if (atajo) aplicarRango(rangoDeAtajo(atajo.dataset.atajo));
+    });
+    $('btnAplicarRango').addEventListener('click', () => {
+        const desde = $('rangoDesde').value;
+        const hasta = $('rangoHasta').value;
+        if (!esFechaISO(desde)) return errorEnCampo($('rangoDesde'), 'Elegí la fecha de inicio');
+        if (!esFechaISO(hasta)) return errorEnCampo($('rangoHasta'), 'Elegí la fecha de fin');
+        // Si quedaron al revés, se dan vuelta en lugar de mostrar un error.
+        aplicarRango(desde <= hasta ? { desde, hasta } : { desde: hasta, hasta: desde });
+    });
+    const quitar = () => aplicarRango(null);
+    $('btnQuitarRango').addEventListener('click', quitar);
+    $('btnLimpiarRango').addEventListener('click', quitar);
+}
+
+// ===== Descargas (Excel y PDF) =====
+// Se descarga exactamente lo que se ve: mes o rango, tipo y búsqueda.
+const NOMBRES_FILTRO = { ingreso: 'Solo ingresos', gasto: 'Solo gastos', transferencia: 'Solo transferencias' };
+
+function datosParaDescargar() {
+    const rango = rangoMovimientos();
+    // La pantalla muestra lo más nuevo primero; el archivo va en orden cronológico.
+    const lista = buscarYFiltrar(busquedaActual, filtroActual, rango).reverse();
+    const filtros = [];
+    if (filtroActual !== 'todos') filtros.push(NOMBRES_FILTRO[filtroActual]);
+    if (busquedaActual.trim()) filtros.push(`Búsqueda: «${busquedaActual.trim()}»`);
+    return {
+        rango,
+        datos: {
+            filas: filasParaExportar(lista),
+            totales: calcularTotales(lista),
+            categorias: resumenPorCategoria(lista, 'gasto'),
+            textoRango: textoRango(rango),
+            filtros,
+            generado: new Date()
+        }
+    };
+}
+
+function abrirModalDescargar() {
+    const { datos } = datosParaDescargar();
+    const cantidad = datos.filas.length;
+    if (cantidad === 0) return mostrarToast('No hay movimientos para descargar con estos filtros', 'alerta');
+    const rango = datos.textoRango.charAt(0).toLowerCase() + datos.textoRango.slice(1);
+    $('detalleDescargar').textContent = [`${cantidad} ${cantidad === 1 ? 'movimiento' : 'movimientos'}`, rango, ...datos.filtros].join(' · ');
+    abrirModal('modalDescargar');
+}
+
+async function descargarMovimientos(formato, boton) {
+    if (boton.getAttribute('aria-busy') === 'true') return;
+    const { rango, datos } = datosParaDescargar();
+    const nombre = `walletera-movimientos-${rango.desde}_${rango.hasta}.${formato}`;
+    boton.setAttribute('aria-busy', 'true');
+    try {
+        await (formato === 'pdf' ? descargarPDF(datos, nombre) : descargarExcel(datos, nombre));
+        cerrarModal('modalDescargar');
+        mostrarToast(formato === 'pdf' ? 'PDF descargado' : 'Excel descargado');
+    } catch (error) {
+        console.error(error);
+        mostrarToast(error instanceof ErrorDeCarga ? error.message : 'No se pudo generar el archivo. Intentá de nuevo.', 'alerta');
+    } finally {
+        boton.removeAttribute('aria-busy');
+    }
+}
+
+function configurarDescargas() {
+    $('btnDescargar').addEventListener('click', abrirModalDescargar);
+    $('modalDescargar').addEventListener('click', e => {
+        const boton = e.target.closest('[data-descargar]');
+        if (boton) descargarMovimientos(boton.dataset.descargar, boton);
+    });
 }
 
 function configurarBuscadorYFiltros() {
@@ -1037,15 +1165,6 @@ function configurarFormularioCategoria() {
 }
 
 // ===== Ajustes: datos de ejemplo, exportación y respaldo =====
-function descargar(nombre, contenido, tipo) {
-    const url = URL.createObjectURL(new Blob([contenido], { type: tipo }));
-    const enlace = Object.assign(document.createElement('a'), { href: url, download: nombre });
-    document.body.appendChild(enlace);
-    enlace.click();
-    enlace.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 async function cargarEjemplo() {
     if (hayMovimientos()) {
         const ok = await confirmar({
@@ -1067,10 +1186,10 @@ function configurarAjustes() {
     $('btnExportarCSV').addEventListener('click', () => {
         if (!hayMovimientos()) return mostrarToast('Todavía no hay movimientos para exportar', 'alerta');
         // El BOM hace que Excel reconozca los acentos.
-        descargar(`walletera-movimientos-${fechaHoy()}.csv`, `\ufeff${exportarCSV()}`, 'text/csv;charset=utf-8');
+        descargarArchivo(`walletera-movimientos-${fechaHoy()}.csv`, `\ufeff${exportarCSV()}`, 'text/csv;charset=utf-8');
     });
     $('btnDescargarRespaldo').addEventListener('click', () => {
-        descargar(`walletera-respaldo-${fechaHoy()}.json`, JSON.stringify(exportarRespaldo(), null, 2), 'application/json');
+        descargarArchivo(`walletera-respaldo-${fechaHoy()}.json`, JSON.stringify(exportarRespaldo(), null, 2), 'application/json');
         mostrarToast('Respaldo descargado');
     });
     $('btnRestaurarRespaldo').addEventListener('click', () => $('archivoRespaldo').click());

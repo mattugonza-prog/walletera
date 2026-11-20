@@ -12,6 +12,7 @@ const ARCHIVOS = [
     './js/datos.js',
     './js/dominio.js',
     './js/ejemplo.js',
+    './js/exportar.js',
     './css/estilos.css',
     './categorias.json',
     './iconos.json',

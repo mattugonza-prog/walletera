@@ -119,6 +119,56 @@ describe('integridad', () => {
     });
 });
 
+describe('rango de fechas', () => {
+    async function conMovimientos() {
+        const base = await conDosCuentas();
+        const { d, efectivo, banco, comida, sueldo } = base;
+        d.crearMovimiento({ descripcion: 'Super agosto', monto: 100, tipo: 'gasto', fecha: '2026-08-31', cuentaId: efectivo.id, categoriaId: comida.id });
+        d.crearMovimiento({ descripcion: 'Super septiembre', monto: 200, tipo: 'gasto', fecha: '2026-09-15', cuentaId: efectivo.id, categoriaId: comida.id });
+        d.crearMovimiento({ descripcion: 'Sueldo', monto: 1000, tipo: 'ingreso', fecha: '2026-10-01', cuentaId: banco.id, categoriaId: sueldo.id });
+        d.crearMovimiento({ descripcion: '', monto: 300, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
+        d.crearMovimiento({ descripcion: 'Farmacia', monto: 50.5, tipo: 'gasto', fecha: '2026-11-10', cuentaId: efectivo.id });
+        d.crearMovimiento({ descripcion: 'Super noviembre', monto: 70, tipo: 'gasto', fecha: '2026-11-11', cuentaId: efectivo.id, categoriaId: comida.id });
+        return base;
+    }
+    const rango = { desde: '2026-09-15', hasta: '2026-11-10' };
+
+    it('incluye los dos extremos y cruza meses, del más nuevo al más viejo', async () => {
+        const { d } = await conMovimientos();
+        expect(d.obtenerMovimientosEntre(rango).map(m => m.fecha)).toEqual(['2026-11-10', '2026-10-05', '2026-10-01', '2026-09-15']);
+    });
+
+    it('combina el rango con el tipo y la búsqueda; un mes sigue funcionando como rango', async () => {
+        const { d } = await conMovimientos();
+        expect(d.buscarYFiltrar('', 'gasto', rango).map(m => m.descripcion)).toEqual(['Farmacia', 'Super septiembre']);
+        expect(d.buscarYFiltrar('super', 'todos', rango).map(m => m.descripcion)).toEqual(['Super septiembre']);
+        expect(d.buscarYFiltrar('', 'todos', '2026-11').map(m => m.descripcion)).toEqual(['Super noviembre', 'Farmacia']);
+    });
+
+    it('los totales ignoran las transferencias', async () => {
+        const { d } = await conMovimientos();
+        expect(d.calcularTotales(d.obtenerMovimientosEntre(rango))).toEqual({ ingresos: 1000, gastos: 250.5, resultado: 749.5, cantidad: 4 });
+    });
+
+    it('resume el gasto por categoría con su parte del total', async () => {
+        const { d } = await conMovimientos();
+        const resumen = d.resumenPorCategoria(d.obtenerMovimientosEntre(rango));
+        expect(resumen.map(c => [c.nombre, c.monto])).toEqual([['Alimentación', 200], ['Sin categoría', 50.5]]);
+        expect(resumen[0].porcentaje).toBeCloseTo((200 / 250.5) * 100);
+    });
+
+    it('arma filas para exportar con signo, cuentas y categoría', async () => {
+        const { d } = await conMovimientos();
+        const filas = d.filasParaExportar(d.obtenerMovimientosEntre(rango).reverse());
+        expect(filas.map(f => [f.fecha, f.tipoNombre, f.monto, f.categoria, f.cuenta, f.cuentaDestino])).toEqual([
+            ['2026-09-15', 'Gasto', -200, 'Alimentación', 'Efectivo', ''],
+            ['2026-10-01', 'Ingreso', 1000, 'Sueldo', 'Banco', ''],
+            ['2026-10-05', 'Transferencia', 300, '', 'Banco', 'Efectivo'],
+            ['2026-11-10', 'Gasto', -50.5, '', 'Efectivo', '']
+        ]);
+    });
+});
+
 describe('presupuesto por mes', () => {
     const editar = (d, cat, presupuesto, periodo) =>
         d.editarCategoria(cat.id, { nombre: cat.nombre, icono: cat.icono, color: cat.color, presupuesto }, periodo);

@@ -1,5 +1,10 @@
 // ===== Walletera | datos.js =====
 // Capa de datos: estado, persistencia, migraciones y cálculos.
+// Dos modos:
+// - local: todo vive en localStorage (la demo sin cuenta, como siempre).
+// - nube:  el servidor es la fuente de verdad. Cada cambio se guarda primero en la API y
+//          recién después se aplica al estado; si el pedido falla, no cambia nada.
+//          Los cálculos (saldos, resúmenes, gráficos) siguen siendo locales sobre lo cargado.
 import { generarDatosDeEjemplo } from './ejemplo.js';
 import {
     TIPOS_CUENTA, COLORES_CATEGORIA,
@@ -29,12 +34,21 @@ const GRUPOS_ICONOS_FALLBACK = [
     { grupo: 'Otros',      iconos: ['ph-heartbeat', 'ph-film-slate', 'ph-piggy-bank', 'ph-tag'] }
 ];
 
+// En modo nube, la última copia de los datos para verlos sin conexión.
+const CLAVE_COPIA_NUBE = 'walletera_nube_copia';
+const MENSAJE_SOLO_LECTURA = 'Sin conexión: podés ver tus datos, pero para guardar cambios necesitás internet.';
+
 // ===== Estado en memoria =====
 let cuentas       = [];
 let categorias    = [];
 let movimientos   = [];
 let recurrentes   = [];
 let gruposIconos  = [];
+
+let modo          = 'local';   // 'local' | 'nube'
+let remoto        = null;      // cliente de la API (js/api.js) en modo nube
+let soloLectura   = false;     // nube sin conexión: se muestra la última copia
+let emailNube     = null;
 
 // ===== Helpers de persistencia =====
 function leer(clave, porDefecto) {
@@ -50,10 +64,36 @@ function escribir(clave, valor) {
     localStorage.setItem(clave, JSON.stringify(valor));
 }
 
-const guardarCuentas     = () => escribir(CLAVES.cuentas, cuentas);
-const guardarCategorias  = () => escribir(CLAVES.categorias, categorias);
-const guardarMovimientos = () => escribir(CLAVES.movimientos, movimientos);
-const guardarRecurrentes = () => escribir(CLAVES.recurrentes, recurrentes);
+// En modo local cada colección va a su clave; en modo nube los datos ya están en el
+// servidor y acá solo se actualiza la copia para verlos sin conexión.
+function guardar(clave, valor) {
+    if (modo === 'nube') guardarCopia();
+    else escribir(clave, valor);
+}
+
+const guardarCuentas     = () => guardar(CLAVES.cuentas, cuentas);
+const guardarCategorias  = () => guardar(CLAVES.categorias, categorias);
+const guardarMovimientos = () => guardar(CLAVES.movimientos, movimientos);
+const guardarRecurrentes = () => guardar(CLAVES.recurrentes, recurrentes);
+
+function guardarCopia() {
+    try {
+        escribir(CLAVE_COPIA_NUBE, { email: emailNube, guardado: Date.now(), cuentas, categorias, movimientos, recurrentes });
+    } catch { /* sin espacio: la copia es solo una ayuda para cuando no hay conexión */ }
+}
+
+const hayCopiaNube = () => Boolean(leer(CLAVE_COPIA_NUBE, null));
+
+function borrarCopiaNube() {
+    try {
+        localStorage.removeItem(CLAVE_COPIA_NUBE);
+    } catch { /* sin almacenamiento */ }
+}
+
+// En modo nube sin conexión no se puede guardar nada.
+function asegurarEscritura() {
+    if (soloLectura) throw new Error(MENSAJE_SOLO_LECTURA);
+}
 
 // ===== Fechas =====
 // Las fechas de los movimientos se guardan como 'AAAA-MM-DD' (fecha local, sin hora)
@@ -174,7 +214,55 @@ function migrarDatos() {
 }
 
 // ===== Inicialización =====
-async function inicializarDatos() {
+// inicializarDatos()                        → modo local (localStorage)
+// inicializarDatos({ modo: 'nube', api })   → modo nube; sin conexión usa la última copia
+//                                             (solo lectura) y si no hay copia, lanza.
+async function inicializarDatos({ modo: modoPedido = 'local', api = null } = {}) {
+    remoto = null;
+    soloLectura = false;
+    emailNube = null;
+    if (modoPedido === 'nube') return inicializarNube(api);
+    modo = 'local';
+    return inicializarLocal();
+}
+
+function aplicarEstado(estado) {
+    emailNube = estado.email ?? emailNube;
+    cuentas = estado.cuentas;
+    categorias = estado.categorias;
+    movimientos = estado.movimientos;
+    recurrentes = estado.recurrentes;
+}
+
+async function inicializarNube(api) {
+    await cargarIconos();
+    try {
+        aplicarEstado(await api.obtenerEstado());
+    } catch (error) {
+        const copia = leer(CLAVE_COPIA_NUBE, null);
+        if (!error?.sinConexion || !copia) throw error;
+        aplicarEstado(copia);
+        soloLectura = true;
+    }
+    modo = 'nube';
+    remoto = api;
+    if (!soloLectura) guardarCopia();
+}
+
+// Trae del servidor lo que haya cambiado (por ejemplo, lo que cargó otro dispositivo).
+async function recargar() {
+    if (modo !== 'nube') return false;
+    aplicarEstado(await remoto.obtenerEstado());
+    soloLectura = false;
+    guardarCopia();
+    return true;
+}
+
+const modoActual = () => modo;
+const esSoloLectura = () => soloLectura;
+const emailActual = () => emailNube;
+
+async function inicializarLocal() {
     const { desde } = migrarDatos();
     cuentas       = leer(CLAVES.cuentas, []);
     categorias    = leer(CLAVES.categorias, []);
@@ -220,8 +308,15 @@ async function cargarCategoriasIniciales() {
 }
 
 // ===== Respaldo, importación y datos de ejemplo =====
-function reemplazarDatos(datos) {
+// En modo nube el servidor vuelve a validar y reemplaza todo; después se recarga.
+async function reemplazarDatos(datos) {
+    asegurarEscritura();
     const validos = validarRespaldo(datos);
+    if (modo === 'nube') {
+        await remoto.reemplazarDatos(validos);
+        await recargar();
+        return validos;
+    }
     cuentas = validos.cuentas;
     categorias = validos.categorias;
     movimientos = validos.movimientos;
@@ -270,13 +365,22 @@ function exportarCSV() {
     return [encabezado, ...filas].map(fila => fila.map(celda).join(';')).join('\r\n');
 }
 
+// Los datos de ejemplo son para explorar la demo: nunca pisan los datos de la nube.
 async function cargarDatosDeEjemplo() {
+    if (modo === 'nube') throw new Error('Los datos de ejemplo solo se pueden cargar sin cuenta.');
     const semilla = await cargarCategoriasIniciales();
     return reemplazarDatos(generarDatosDeEjemplo(semilla));
 }
 
-// Borra todo (incluidos los respaldos de migración) y vuelve al estado inicial.
+// Borra todo y vuelve al estado inicial. En modo local también borra los respaldos de
+// migración; en modo nube borra los datos del usuario en el servidor.
 async function reiniciarDatos() {
+    asegurarEscritura();
+    if (modo === 'nube') {
+        await remoto.borrarTodo();
+        await recargar();
+        return;
+    }
     Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i))
         .filter(clave => clave.startsWith('walletera_respaldo_'))
         .forEach(clave => localStorage.removeItem(clave));
@@ -311,17 +415,24 @@ function datosCuenta({ nombre, tipo, saldoInicial }) {
     };
 }
 
-function crearCuenta(datos) {
-    const nueva = { id: generarId(), ...datosCuenta(datos) };
+// Altas, bajas y modificaciones: en modo nube primero se guarda en el servidor (que puede
+// rechazarlo) y se usa lo que devuelve; recién entonces cambia el estado local.
+async function crearCuenta(datos) {
+    asegurarEscritura();
+    let nueva = { id: generarId(), ...datosCuenta(datos) };
+    if (remoto) ({ cuenta: nueva } = await remoto.crear('cuentas', nueva));
     cuentas.push(nueva);
     guardarCuentas();
     return nueva;
 }
 
-function editarCuenta(id, datos) {
+async function editarCuenta(id, datos) {
+    asegurarEscritura();
     const cuenta = obtenerCuentaPorId(id);
     if (!cuenta) return null;
-    Object.assign(cuenta, datosCuenta(datos));
+    let cambios = datosCuenta(datos);
+    if (remoto) ({ cuenta: cambios } = await remoto.editar('cuentas', cuenta.id, cambios));
+    Object.assign(cuenta, cambios);
     guardarCuentas();
     return cuenta;
 }
@@ -338,8 +449,10 @@ function contarRecurrentesDeCuenta(id) {
 
 // Una cuenta con movimientos no se elimina: borrarla cambiaría el saldo total
 // y dejaría transferencias sin origen o destino.
-function eliminarCuenta(id) {
+async function eliminarCuenta(id) {
+    asegurarEscritura();
     if (contarMovimientosDeCuenta(id) > 0 || contarRecurrentesDeCuenta(id) > 0) return false;
+    if (remoto) await remoto.eliminar('cuentas', String(id));
     cuentas = cuentas.filter(c => c.id !== String(id));
     guardarCuentas();
     return true;
@@ -371,31 +484,38 @@ function obtenerCategoriaPorId(id) {
 }
 
 // El presupuesto se fija desde el mes que se está viendo: los meses anteriores conservan el suyo.
-function crearCategoria({ nombre, icono, color, presupuesto = 0, tipo }, periodo = periodoActual()) {
+async function crearCategoria({ nombre, icono, color, presupuesto = 0, tipo }, periodo = periodoActual()) {
+    asegurarEscritura();
     const presupuestos = conPresupuesto([], periodo, Number(presupuesto) || 0);
-    const nueva = normalizarCategoria({ id: generarId(), nombre, icono, color, tipo, presupuestos });
+    let nueva = normalizarCategoria({ id: generarId(), nombre, icono, color, tipo, presupuestos });
+    if (remoto) ({ categoria: nueva } = await remoto.crear('categorias', nueva));
     categorias.push(nueva);
     guardarCategorias();
     return nueva;
 }
 
 // El tipo de una categoría no cambia al editarla: sus movimientos ya son de ese tipo.
-function editarCategoria(id, { nombre, icono, color, presupuesto }, periodo = periodoActual()) {
+async function editarCategoria(id, { nombre, icono, color, presupuesto }, periodo = periodoActual()) {
+    asegurarEscritura();
     const cat = obtenerCategoriaPorId(id);
     if (!cat) return null;
     const monto = Number(presupuesto) || 0;
     const presupuestos = cat.tipo === 'gasto' && monto !== presupuestoDe(cat, periodo)
         ? conPresupuesto(cat.presupuestos, periodo, monto)
         : cat.presupuestos;
-    Object.assign(cat, normalizarCategoria({ ...cat, nombre, icono, color, presupuestos }));
+    let editada = normalizarCategoria({ ...cat, nombre, icono, color, presupuestos });
+    if (remoto) ({ categoria: editada } = await remoto.editar('categorias', cat.id, editada));
+    Object.assign(cat, editada);
     guardarCategorias();
     return cat;
 }
 
 // Los movimientos de la categoría se conservan y quedan "Sin categoría":
 // borrar un rubro no debe alterar el historial ni el saldo.
-function eliminarCategoria(id) {
+async function eliminarCategoria(id) {
+    asegurarEscritura();
     const clave = String(id);
+    if (remoto) await remoto.eliminar('categorias', clave);
     categorias = categorias.filter(c => c.id !== clave);
     [...movimientos, ...recurrentes].forEach(m => { if (m.categoriaId === clave) m.categoriaId = null; });
     guardarCategorias();
@@ -430,22 +550,29 @@ function datosMovimiento({ descripcion, monto, tipo, fecha, cuentaId, cuentaDest
     };
 }
 
-function crearMovimiento(datos) {
-    const nuevo = { id: generarId(), ...datosMovimiento(datos), creado: Date.now() };
+async function crearMovimiento(datos) {
+    asegurarEscritura();
+    let nuevo = { id: generarId(), ...datosMovimiento(datos), recurrenteId: null, creado: Date.now() };
+    if (remoto) ({ movimiento: nuevo } = await remoto.crear('movimientos', nuevo));
     movimientos.push(nuevo);
     guardarMovimientos();
     return nuevo;
 }
 
-function editarMovimiento(id, datos) {
+async function editarMovimiento(id, datos) {
+    asegurarEscritura();
     const m = obtenerMovimientoPorId(id);
     if (!m) return null;
-    Object.assign(m, datosMovimiento(datos));
+    let cambios = datosMovimiento(datos);
+    if (remoto) ({ movimiento: cambios } = await remoto.editar('movimientos', m.id, cambios));
+    Object.assign(m, cambios);
     guardarMovimientos();
     return m;
 }
 
-function eliminarMovimiento(id) {
+async function eliminarMovimiento(id) {
+    asegurarEscritura();
+    if (remoto) await remoto.eliminar('movimientos', String(id));
     movimientos = movimientos.filter(m => m.id !== String(id));
     guardarMovimientos();
 }
@@ -471,7 +598,9 @@ function agruparPorDia(lista) {
 // ===== Recurrentes =====
 // Un recurrente es una plantilla de movimiento con frecuencia. Cada vez que se abre
 // la app se registran las ocurrencias vencidas hasta hoy; "ultima" evita duplicarlas.
+// En modo nube eso lo hace el servidor (así dos dispositivos no las duplican).
 function generarRecurrentes(hasta = fechaHoy()) {
+    if (modo === 'nube') return 0;
     let generados = 0;
     recurrentes.forEach(r => {
         const { id, inicio, frecuencia, ultima, ...plantilla } = r;
@@ -496,9 +625,23 @@ function obtenerRecurrentePorId(id) {
     return recurrentes.find(r => r.id === String(id));
 }
 
-function crearRecurrente(datos, frecuencia) {
+// Suma los movimientos que registró el servidor (sin repetir los que ya estuvieran).
+function agregarGenerados(generados) {
+    const ids = new Set(movimientos.map(m => m.id));
+    movimientos.push(...generados.filter(m => !ids.has(m.id)));
+    guardarMovimientos();
+}
+
+async function crearRecurrente(datos, frecuencia) {
+    asegurarEscritura();
     const { fecha, ...plantilla } = datosMovimiento(datos);
     const nuevo = { id: generarId(), ...plantilla, inicio: fecha, frecuencia, ultima: null };
+    if (remoto) {
+        const { recurrente, generados } = await remoto.crear('recurrentes', nuevo);
+        recurrentes.push(recurrente);
+        agregarGenerados(generados);
+        return recurrente;
+    }
     recurrentes.push(nuevo);
     guardarRecurrentes();
     generarRecurrentes();
@@ -507,19 +650,30 @@ function crearRecurrente(datos, frecuencia) {
 
 // Cambia la plantilla para las próximas ocurrencias; las ya registradas no se tocan.
 // La fecha recibida es la próxima ocurrencia y tiene que ser posterior a la última registrada.
-function editarRecurrente(id, datos, frecuencia) {
+// Se valida acá también en modo nube, para avisar sin esperar al servidor.
+async function editarRecurrente(id, datos, frecuencia) {
+    asegurarEscritura();
     const r = obtenerRecurrentePorId(id);
     if (!r) return null;
     const { fecha, ...plantilla } = datosMovimiento(datos);
-    Object.assign(r, aplicarEdicionRecurrente(r, plantilla, fecha, frecuencia));
+    const editado = aplicarEdicionRecurrente(r, plantilla, fecha, frecuencia);
+    if (remoto) {
+        const { recurrente, generados } = await remoto.editar('recurrentes', r.id, { ...plantilla, fecha, frecuencia });
+        Object.assign(r, recurrente);
+        agregarGenerados(generados);
+        return r;
+    }
+    Object.assign(r, editado);
     guardarRecurrentes();
     generarRecurrentes();
     return r;
 }
 
 // Los movimientos ya registrados se conservan, sin el vínculo.
-function eliminarRecurrente(id) {
+async function eliminarRecurrente(id) {
+    asegurarEscritura();
     const clave = String(id);
+    if (remoto) await remoto.eliminar('recurrentes', clave);
     recurrentes = recurrentes.filter(r => r.id !== clave);
     movimientos.forEach(m => { if (m.recurrenteId === clave) m.recurrenteId = null; });
     guardarRecurrentes();
@@ -717,7 +871,7 @@ function formatearFecha(fechaISO) {
 
 export {
     TIPOS_CUENTA, COLORES_CATEGORIA,
-    inicializarDatos,
+    inicializarDatos, recargar, modoActual, esSoloLectura, emailActual, hayCopiaNube, borrarCopiaNube,
     obtenerGruposIconos, primerIcono,
     obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
     contarMovimientosDeCuenta, contarRecurrentesDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,

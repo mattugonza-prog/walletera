@@ -9,6 +9,7 @@ const ARCHIVOS = [
     './',
     './index.html',
     './main.js',
+    './js/api.js',
     './js/datos.js',
     './js/dominio.js',
     './js/ejemplo.js',

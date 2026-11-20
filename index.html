@@ -55,6 +55,10 @@
     </aside>
 
     <main class="principal" id="principal">
+        <div class="banner" id="bannerSinConexion" role="status" hidden>
+            <i class="ph ph-wifi-slash" aria-hidden="true"></i>
+            <span>Sin conexión: estás viendo los últimos datos guardados. Para cargar o cambiar algo necesitás internet.</span>
+        </div>
         <!-- ===== Inicio ===== -->
         <section class="seccion activa" id="inicio" aria-labelledby="saludo">
             <header class="saludo">
@@ -302,6 +306,11 @@
             <header class="encabezado">
                 <h1 id="tituloAjustes">Ajustes</h1>
             </header>
+            <section class="ajustes-grupo" id="grupoUsuario" aria-labelledby="tituloUsuario" hidden>
+                <h2 class="ajustes-titulo" id="tituloUsuario">Tu usuario</h2>
+                <p class="texto-suave" id="textoUsuario"></p>
+                <ul class="lista tarjeta" id="opcionesUsuario"></ul>
+            </section>
             <section class="ajustes-grupo" aria-labelledby="tituloApariencia">
                 <h2 class="ajustes-titulo" id="tituloApariencia">Apariencia</h2>
                 <ul class="lista tarjeta">
@@ -316,9 +325,9 @@
             </section>
             <section class="ajustes-grupo" aria-labelledby="tituloDatos">
                 <h2 class="ajustes-titulo" id="tituloDatos">Tus datos</h2>
-                <p class="texto-suave">Walletera guarda todo en este navegador: nada sale de tu dispositivo. Descargá un respaldo de vez en cuando.</p>
+                <p class="texto-suave" id="textoDatos">Walletera guarda todo en este navegador: nada sale de tu dispositivo. Descargá un respaldo de vez en cuando.</p>
                 <ul class="lista tarjeta">
-                    <li>
+                    <li data-solo-local>
                         <button class="fila" type="button" data-cargar-ejemplo>
                             <span class="icono-tile tono-verde"><i class="ph ph-sparkle" aria-hidden="true"></i></span>
                             <span class="fila-texto"><span class="fila-nombre">Cargar datos de ejemplo</span><span class="fila-meta">Tres meses de movimientos para explorar la app</span></span>
@@ -489,6 +498,72 @@
             <div class="formulario-acciones">
                 <button class="btn btn-peligro-texto" type="button" id="btnEliminarCategoria" hidden><i class="ph ph-trash" aria-hidden="true"></i> Eliminar</button>
                 <button class="btn btn-primario" type="submit">Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===== Acceso: ingresar o crear el usuario de la casa ===== -->
+<div class="modal" id="modalAcceso" aria-hidden="true">
+    <div class="modal-fondo" data-cerrar="modalAcceso"></div>
+    <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="tituloAcceso">
+        <header class="modal-encabezado">
+            <h2 id="tituloAcceso">Ingresar</h2>
+            <button class="btn-icono" type="button" data-cerrar="modalAcceso" aria-label="Cerrar"><i class="ph ph-x" aria-hidden="true"></i></button>
+        </header>
+        <form class="formulario" id="formAcceso" novalidate>
+            <p class="aviso" id="motivoAcceso" role="alert" hidden></p>
+            <div class="segmentado segmentado-dos" id="pestanasAcceso" role="group" aria-label="Ingresar o crear usuario" hidden>
+                <button type="button" class="segmento activa" data-acceso="ingresar" aria-pressed="true">Ingresar</button>
+                <button type="button" class="segmento" data-acceso="registrar" aria-pressed="false">Crear usuario</button>
+            </div>
+            <label class="campo">
+                <span>Email</span>
+                <input type="email" id="accesoEmail" autocomplete="username" inputmode="email" maxlength="254" required>
+            </label>
+            <label class="campo">
+                <span>Contraseña</span>
+                <input type="password" id="accesoClave" autocomplete="current-password" maxlength="200" required>
+            </label>
+            <label class="campo" id="campoCodigo" hidden>
+                <span>Código de registro</span>
+                <input type="text" id="accesoCodigo" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="ayudaCodigo">
+                <small class="campo-ayuda" id="ayudaCodigo">El que configuraste en Vercel como CODIGO_REGISTRO.</small>
+            </label>
+            <p class="campo-ayuda">Un solo usuario para la casa: ingresá con el mismo email y contraseña en cada dispositivo y todos van a ver y cargar los mismos datos.</p>
+            <div class="formulario-acciones">
+                <button class="btn btn-texto" type="button" id="btnUsarSinCuenta" hidden>Usar sin cuenta</button>
+                <button class="btn btn-primario" type="submit" id="btnAcceso">Ingresar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===== Cambiar contraseña ===== -->
+<div class="modal" id="modalClave" aria-hidden="true">
+    <div class="modal-fondo" data-cerrar="modalClave"></div>
+    <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="tituloClave">
+        <header class="modal-encabezado">
+            <h2 id="tituloClave">Cambiar contraseña</h2>
+            <button class="btn-icono" type="button" data-cerrar="modalClave" aria-label="Cerrar"><i class="ph ph-x" aria-hidden="true"></i></button>
+        </header>
+        <form class="formulario" id="formClave" novalidate>
+            <input type="text" autocomplete="username" hidden aria-hidden="true" tabindex="-1">
+            <label class="campo">
+                <span>Contraseña actual</span>
+                <input type="password" id="claveActual" autocomplete="current-password" maxlength="200">
+            </label>
+            <label class="campo">
+                <span>Contraseña nueva</span>
+                <input type="password" id="claveNueva" autocomplete="new-password" minlength="8" maxlength="200" aria-describedby="ayudaClaveNueva">
+                <small class="campo-ayuda" id="ayudaClaveNueva">Al menos 8 caracteres. Los demás dispositivos van a tener que ingresar de nuevo.</small>
+            </label>
+            <label class="campo">
+                <span>Repetí la contraseña nueva</span>
+                <input type="password" id="claveRepetida" autocomplete="new-password" maxlength="200">
+            </label>
+            <div class="formulario-acciones">
+                <button class="btn btn-primario" type="submit">Cambiar</button>
             </div>
         </form>
     </div>

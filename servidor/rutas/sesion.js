@@ -19,9 +19,11 @@ export function rutasDeSesion({ pool, entorno }) {
     // El registro solo está abierto mientras exista CODIGO_REGISTRO (y hay que conocerlo).
     const registroAbierto = () => Boolean(entorno.CODIGO_REGISTRO);
 
+    // Siempre 200: no tener sesión es lo normal para quien usa la demo, no un error
+    // (un 401 acá ensuciaría la consola de cada visitante).
     r.get('/sesion', async c => {
         const actual = await leerSesion(pool, leerCookie(c));
-        if (!actual) return c.json({ error: 'No iniciaste sesión.', registroAbierto: registroAbierto() }, 401);
+        if (!actual) return c.json({ email: null, registroAbierto: registroAbierto() });
         if (actual.renovada) guardarCookie(c, leerCookie(c));
         return c.json({ email: actual.usuario.email });
     });

@@ -540,6 +540,24 @@ h2 { font-size: 17px; }
     transition: background var(--rapida) ease, color var(--rapida) ease;
 }
 .segmento.activa { background: var(--superficie); color: var(--tinta); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+.segmentado-dos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* Aviso dentro de un formulario (por ejemplo, por qué se pide ingresar de nuevo) */
+.aviso {
+    font-size: 14px; line-height: 1.45; color: var(--tinta-media);
+    background: color-mix(in srgb, var(--alerta) 14%, transparent);
+    border-radius: var(--radio-md); padding: 12px 14px;
+}
+
+/* Banner de sin conexión (modo nube): se ve lo último guardado, sin poder cambiarlo */
+.banner {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px; padding: 12px 14px;
+    border-radius: var(--radio-md);
+    background: color-mix(in srgb, var(--alerta) 14%, transparent);
+    color: var(--tinta-media); font-size: 14px; line-height: 1.4;
+}
+.banner i { font-size: 20px; color: var(--alerta); flex-shrink: 0; }
 
 .campo-monto {
     display: flex; align-items: baseline; justify-content: center; gap: 6px;

@@ -2,7 +2,7 @@
 // Capa de presentación: DOM, eventos y render.
 import {
     TIPOS_CUENTA, COLORES_CATEGORIA,
-    inicializarDatos,
+    inicializarDatos, recargar, modoActual, esSoloLectura, emailActual, borrarCopiaNube,
     obtenerGruposIconos, primerIcono,
     obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
     contarMovimientosDeCuenta, contarRecurrentesDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
@@ -19,6 +19,7 @@ import {
     cargarDatosDeEjemplo, reiniciarDatos, hayMovimientos
 } from './js/datos.js';
 import { descargarArchivo, descargarExcel, descargarPDF, ErrorDeCarga } from './js/exportar.js';
+import * as api from './js/api.js';
 
 // ===== Estado de UI =====
 let periodo = periodoActual();
@@ -31,8 +32,14 @@ let graficoMensual = null;
 let resolverConfirmacion = null;
 const modalesAbiertos = [];
 
+// La nube: si este sitio tiene backend y si se puede crear un usuario.
+let nube = { disponible: false, registroAbierto: false };
+let ultimaSincronizacion = 0;
+const RECARGAR_CADA = 60 * 1000;   // al volver a la app, si pasó más de un minuto
+
 const CLAVE_TEMA = 'walletera_tema';
 const CLAVE_OCULTAR = 'walletera_ocultar_montos';
+const CLAVE_MODO = 'walletera_modo';   // 'nube' una vez que se inició sesión en este dispositivo
 const COLOR_META = { oscuro: '#0D0E11', claro: '#F4F5F2' };
 const FUENTE = "'Inter Tight', system-ui, sans-serif";
 const NOMBRES_COLOR = {
@@ -46,6 +53,7 @@ const esc = valor => String(valor).replace(/[&<>"']/g, c => ENTIDADES[c]);
 
 const $ = id => document.getElementById(id);
 const guardarPreferencia = (clave, valor) => { try { localStorage.setItem(clave, valor); } catch { /* sin almacenamiento */ } };
+const leerPreferencia = clave => { try { return localStorage.getItem(clave); } catch { return null; } };
 
 // ===== Inicio =====
 iniciar();
@@ -54,7 +62,6 @@ async function iniciar() {
     configurarTema();
     configurarPrivacidad();
     mostrarSkeletons();
-    await inicializarDatos();
     configurarClicsGlobales();
     configurarModales();
     configurarConfirmacion();
@@ -65,8 +72,48 @@ async function iniciar() {
     configurarRango();
     configurarDescargas();
     configurarAjustes();
-    renderizarTodo();
+    configurarAcceso();
+    configurarSincronizacion();
+    await arrancar();
     registrarServiceWorker();
+}
+
+// Decide con qué datos arranca la app:
+// - Este dispositivo ya inició sesión → los datos de la nube (o la última copia si no hay
+//   conexión). Si la sesión venció, pide ingresar de nuevo en lugar de mostrar en silencio
+//   los datos del navegador, que no son los de la casa.
+// - Si no, el modo local de siempre, sin esperar al servidor (la demo arranca al instante).
+async function arrancar() {
+    if (leerPreferencia(CLAVE_MODO) !== 'nube') {
+        await inicializarDatos();
+        renderizarTodo();
+        api.consultarSesion().then(sesion => {
+            nube = { disponible: sesion.estado !== 'sin-nube', registroAbierto: Boolean(sesion.registroAbierto) };
+            renderizarUsuario();
+        });
+        return;
+    }
+    const sesion = await api.consultarSesion();
+    nube = { disponible: sesion.estado !== 'sin-nube', registroAbierto: Boolean(sesion.registroAbierto) };
+    // Si la sesión ya no existe (venció o se cerró en todos los dispositivos), la copia de
+    // los datos que quedó en este navegador se borra.
+    if (sesion.estado === 'sin-sesion') borrarCopiaNube();
+    if (sesion.estado === 'activa' || sesion.estado === 'sin-conexion') {
+        try {
+            await inicializarDatos({ modo: 'nube', api });
+            ultimaSincronizacion = Date.now();
+            renderizarTodo();
+            return;
+        } catch { /* sin conexión y sin copia guardada: sigue abajo */ }
+    }
+    await inicializarDatos();
+    renderizarTodo();
+    abrirModalAcceso({
+        bloqueante: true,
+        motivo: sesion.estado === 'sin-conexion'
+            ? 'Sin conexión. Conectate a internet para ver los datos de tu casa.'
+            : 'Tu sesión se cerró. Ingresá de nuevo para ver los datos de tu casa.'
+    });
 }
 
 // Permite usar la app sin conexión e instalarla (PWA).
@@ -77,6 +124,7 @@ function registrarServiceWorker() {
 }
 
 function renderizarTodo() {
+    renderizarModo();
     renderizarPeriodo();
     renderizarInicio();
     renderizarMovimientos();
@@ -321,7 +369,9 @@ function renderizarInicio() {
     const cuentas = obtenerCuentasConSaldo();
     const mes = nombreMes(periodo);
     $('saldoTotal').textContent = formatearMoneda(calcularSaldoTotal());
-    $('saldoCuentas').textContent = cuentas.length === 1 ? 'En 1 cuenta' : `En ${cuentas.length} cuentas`;
+    // Dónde están los datos: para no confundir la demo con los datos de la casa.
+    const donde = modoActual() === 'local' ? 'en este navegador' : (esSoloLectura() ? 'sin conexión' : 'en la nube');
+    $('saldoCuentas').textContent = `${cuentas.length === 1 ? 'En 1 cuenta' : `En ${cuentas.length} cuentas`} · ${donde}`;
 
     const pastilla = $('resultadoMes');
     pastilla.textContent = resumen.cantidad
@@ -352,10 +402,11 @@ function renderizarInicio() {
     $('gastosMes').textContent = formatearMoneda(resumen.gastos);
 
     const ultimos = obtenerMovimientos(periodo).slice(0, 6);
-    // Sin ningún movimiento todavía, se ofrece cargar datos de ejemplo para explorar.
+    // Sin ningún movimiento todavía, se ofrece cargar datos de ejemplo para explorar
+    // (solo sin cuenta: nunca se mezclan con los datos de la casa).
     $('ultimosMovimientos').innerHTML = ultimos.length
         ? htmlGrupos(ultimos)
-        : hayMovimientos()
+        : hayMovimientos() || modoActual() === 'nube'
             ? htmlVacio('ph-tray', `Sin movimientos en ${mes}`, 'Tocá + para registrar uno.')
             : htmlVacio('ph-tray', 'Todavía no hay movimientos', 'Registrá el primero con + o explorá la app con datos de ejemplo.', 'div',
                 '<button class="btn btn-secundario" type="button" data-cargar-ejemplo><i class="ph ph-sparkle" aria-hidden="true"></i> Cargar datos de ejemplo</button>');
@@ -757,9 +808,13 @@ function abrirModal(id, enfocar) {
     if (destino) setTimeout(() => destino.focus({ preventScroll: true }), 60);
 }
 
-function cerrarModal(id) {
+// Un modal "bloqueante" (el de ingreso cuando la sesión venció) no se cierra con Escape
+// ni tocando afuera: solo con { forzar: true } desde el propio flujo.
+function cerrarModal(id, { forzar = false } = {}) {
     const modal = $(id);
     if (!modal.classList.contains('activo')) return;
+    if (modal.dataset.bloqueante === 'true' && !forzar) return;
+    delete modal.dataset.bloqueante;
     modal.classList.remove('activo');
     modal.setAttribute('aria-hidden', 'true');
     modal.removeEventListener('keydown', manejarTeclasModal);
@@ -832,6 +887,24 @@ function errorEnCampo(campo, mensaje) {
     mostrarToast(mensaje, 'alerta');
 }
 
+// Un error al guardar (sin conexión, rechazo del servidor): se avisa y el modal queda
+// abierto con lo que se estaba editando.
+function avisarError(error) {
+    mostrarToast(error?.message || 'No se pudo guardar. Probá de nuevo.', 'alerta');
+}
+
+// Mientras se guarda, el botón queda deshabilitado: evita guardar dos veces con un doble clic.
+async function conBotonOcupado(boton, accion) {
+    boton.disabled = true;
+    boton.setAttribute('aria-busy', 'true');
+    try {
+        return await accion();
+    } finally {
+        boton.disabled = false;
+        boton.removeAttribute('aria-busy');
+    }
+}
+
 // ===== Modal Movimiento =====
 const opcionesCuentas = () => obtenerCuentas()
     .map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`)
@@ -898,7 +971,7 @@ function cargarSelectCategorias(tipo) {
 function seleccionarTipo(tipo) {
     const esTransferencia = tipo === 'transferencia';
     $('movimientoTipo').value = tipo;
-    document.querySelectorAll('.segmento').forEach(btn => {
+    $('formMovimiento').querySelectorAll('.segmento').forEach(btn => {
         const activa = btn.dataset.tipo === tipo;
         btn.classList.toggle('activa', activa);
         btn.setAttribute('aria-pressed', String(activa));
@@ -919,11 +992,12 @@ function ajustarAnchoMonto() {
 
 function configurarFormularioMovimiento() {
     $('movimientoMonto').addEventListener('input', ajustarAnchoMonto);
-    document.querySelectorAll('.segmento').forEach(btn => {
+    $('formMovimiento').querySelectorAll('.segmento').forEach(btn => {
         btn.addEventListener('click', () => seleccionarTipo(btn.dataset.tipo));
     });
-    $('formMovimiento').addEventListener('submit', e => {
+    $('formMovimiento').addEventListener('submit', async e => {
         e.preventDefault();
+        const boton           = $('formMovimiento').querySelector('[type=submit]');
         const id              = $('movimientoId').value;
         const tipo            = $('movimientoTipo').value;
         const descripcion     = $('movimientoDescripcion').value;
@@ -946,56 +1020,60 @@ function configurarFormularioMovimiento() {
         if (!esFechaISO(fecha)) return errorEnCampo($('movimientoFecha'), 'Elegí una fecha válida');
 
         const datos = { descripcion, monto, tipo, fecha, cuentaId, cuentaDestinoId, categoriaId };
-        if (recurrenteId) {
-            try {
-                editarRecurrente(recurrenteId, datos, repetir);
-            } catch (error) {
-                return errorEnCampo($('movimientoFecha'), error.message);
-            }
-            mostrarToast('Recurrente actualizado');
-        } else if (repetir) {
-            const antes = obtenerMovimientos().length;
-            crearRecurrente(datos, repetir);
-            const registrados = obtenerMovimientos().length - antes;
-            mostrarToast(registrados > 1
-                ? `Recurrente creado · ${registrados} movimientos registrados`
-                : 'Recurrente creado: se registra solo');
-        } else if (id) {
-            editarMovimiento(id, datos);
-            mostrarToast('Movimiento actualizado');
-        } else {
-            crearMovimiento(datos);
-            mostrarToast(esTransferencia ? 'Transferencia registrada' : 'Movimiento registrado');
+        let aviso;
+        try {
+            await conBotonOcupado(boton, async () => {
+                if (recurrenteId) {
+                    await editarRecurrente(recurrenteId, datos, repetir);
+                    aviso = 'Recurrente actualizado';
+                } else if (repetir) {
+                    const antes = obtenerMovimientos().length;
+                    await crearRecurrente(datos, repetir);
+                    const registrados = obtenerMovimientos().length - antes;
+                    aviso = registrados > 1
+                        ? `Recurrente creado · ${registrados} movimientos registrados`
+                        : 'Recurrente creado: se registra solo';
+                } else if (id) {
+                    await editarMovimiento(id, datos);
+                    aviso = 'Movimiento actualizado';
+                } else {
+                    await crearMovimiento(datos);
+                    aviso = esTransferencia ? 'Transferencia registrada' : 'Movimiento registrado';
+                }
+            });
+        } catch (error) {
+            // La regla de la próxima fecha de un recurrente se marca en el campo.
+            if (recurrenteId && /fecha/i.test(error.message)) return errorEnCampo($('movimientoFecha'), error.message);
+            return avisarError(error);
         }
         cerrarModal('modalMovimiento');
+        mostrarToast(aviso);
         renderizarTodo();
     });
     $('btnEliminarMovimiento').addEventListener('click', async () => {
         const id = $('movimientoId').value;
         const recurrenteId = $('recurrenteId').value;
-        if (recurrenteId) {
-            const ok = await confirmar({
+        const ok = await confirmar(recurrenteId
+            ? {
                 titulo: '¿Eliminar recurrente?',
                 texto: 'Deja de registrarse. Los movimientos que ya se registraron se conservan.',
                 aceptar: 'Eliminar',
                 peligro: true
+            }
+            : {
+                titulo: '¿Eliminar movimiento?',
+                texto: 'Esta acción no se puede deshacer.',
+                aceptar: 'Eliminar',
+                peligro: true
             });
-            if (!ok) return;
-            eliminarRecurrente(recurrenteId);
-            cerrarModal('modalMovimiento');
-            mostrarToast('Recurrente eliminado');
-            return renderizarTodo();
-        }
-        const ok = await confirmar({
-            titulo: '¿Eliminar movimiento?',
-            texto: 'Esta acción no se puede deshacer.',
-            aceptar: 'Eliminar',
-            peligro: true
-        });
         if (!ok) return;
-        eliminarMovimiento(id);
+        try {
+            await conBotonOcupado($('btnEliminarMovimiento'), () => (recurrenteId ? eliminarRecurrente(recurrenteId) : eliminarMovimiento(id)));
+        } catch (error) {
+            return avisarError(error);
+        }
         cerrarModal('modalMovimiento');
-        mostrarToast('Movimiento eliminado');
+        mostrarToast(recurrenteId ? 'Recurrente eliminado' : 'Movimiento eliminado');
         renderizarTodo();
     });
 }
@@ -1019,7 +1097,7 @@ function abrirModalCuenta(id) {
 
 function configurarFormularioCuenta() {
     $('btnNuevaCuenta').addEventListener('click', () => abrirModalCuenta());
-    $('formCuenta').addEventListener('submit', e => {
+    $('formCuenta').addEventListener('submit', async e => {
         e.preventDefault();
         const id           = $('cuentaId').value;
         const nombre       = $('cuentaNombre').value;
@@ -1027,14 +1105,15 @@ function configurarFormularioCuenta() {
         const saldoInicial = Number($('cuentaSaldoInicial').value);
         if (!nombre.trim()) return errorEnCampo($('cuentaNombre'), 'Escribí un nombre para la cuenta');
         if (!Number.isFinite(saldoInicial)) return errorEnCampo($('cuentaSaldoInicial'), 'Ingresá un saldo inicial válido');
-        if (id) {
-            editarCuenta(id, { nombre, tipo, saldoInicial });
-            mostrarToast('Cuenta actualizada');
-        } else {
-            crearCuenta({ nombre, tipo, saldoInicial });
-            mostrarToast('Cuenta creada');
+        try {
+            await conBotonOcupado($('formCuenta').querySelector('[type=submit]'), () => (id
+                ? editarCuenta(id, { nombre, tipo, saldoInicial })
+                : crearCuenta({ nombre, tipo, saldoInicial })));
+        } catch (error) {
+            return avisarError(error);
         }
         cerrarModal('modalCuenta');
+        mostrarToast(id ? 'Cuenta actualizada' : 'Cuenta creada');
         renderizarTodo();
     });
     $('btnEliminarCuenta').addEventListener('click', async () => {
@@ -1060,7 +1139,12 @@ function configurarFormularioCuenta() {
             aceptar: 'Eliminar',
             peligro: true
         });
-        if (!ok || !eliminarCuenta(id)) return;
+        if (!ok) return;
+        try {
+            if (!(await conBotonOcupado($('btnEliminarCuenta'), () => eliminarCuenta(id)))) return;
+        } catch (error) {
+            return avisarError(error);
+        }
         cerrarModal('modalCuenta');
         mostrarToast('Cuenta eliminada');
         renderizarTodo();
@@ -1128,7 +1212,7 @@ function configurarFormularioCategoria() {
         const btn = e.target.closest('[data-icono]');
         if (btn) seleccionarIcono(btn.dataset.icono);
     });
-    $('formCategoria').addEventListener('submit', e => {
+    $('formCategoria').addEventListener('submit', async e => {
         e.preventDefault();
         const id          = $('categoriaId').value;
         const tipo        = $('categoriaTipo').value;
@@ -1138,14 +1222,15 @@ function configurarFormularioCategoria() {
         const presupuesto = tipo === 'gasto' ? Number($('categoriaPresupuesto').value || 0) : 0;
         if (!nombre.trim()) return errorEnCampo($('categoriaNombre'), 'Escribí un nombre para la categoría');
         if (!Number.isFinite(presupuesto) || presupuesto < 0) return errorEnCampo($('categoriaPresupuesto'), 'Ingresá un presupuesto válido');
-        if (id) {
-            editarCategoria(id, { nombre, icono, color, presupuesto }, periodo);
-            mostrarToast('Categoría actualizada');
-        } else {
-            crearCategoria({ nombre, icono, color, presupuesto, tipo }, periodo);
-            mostrarToast('Categoría creada');
+        try {
+            await conBotonOcupado($('formCategoria').querySelector('[type=submit]'), () => (id
+                ? editarCategoria(id, { nombre, icono, color, presupuesto }, periodo)
+                : crearCategoria({ nombre, icono, color, presupuesto, tipo }, periodo)));
+        } catch (error) {
+            return avisarError(error);
         }
         cerrarModal('modalCategoria');
+        mostrarToast(id ? 'Categoría actualizada' : 'Categoría creada');
         renderizarTodo();
     });
     $('btnEliminarCategoria').addEventListener('click', async () => {
@@ -1157,7 +1242,11 @@ function configurarFormularioCategoria() {
             peligro: true
         });
         if (!ok) return;
-        eliminarCategoria(id);
+        try {
+            await conBotonOcupado($('btnEliminarCategoria'), () => eliminarCategoria(id));
+        } catch (error) {
+            return avisarError(error);
+        }
         cerrarModal('modalCategoria');
         mostrarToast('Categoría eliminada');
         renderizarTodo();
@@ -1166,6 +1255,7 @@ function configurarFormularioCategoria() {
 
 // ===== Ajustes: datos de ejemplo, exportación y respaldo =====
 async function cargarEjemplo() {
+    if (modoActual() === 'nube') return;
     if (hayMovimientos()) {
         const ok = await confirmar({
             titulo: '¿Reemplazar tus datos?',
@@ -1204,29 +1294,273 @@ function configurarAjustes() {
             return mostrarToast(error instanceof SyntaxError ? 'El archivo no es un JSON válido' : error.message, 'alerta');
         }
         const resumen = `${datos.cuentas.length} cuentas, ${datos.categorias.length} categorías y ${datos.movimientos.length} movimientos`;
+        const enNube = modoActual() === 'nube';
         const ok = await confirmar({
             titulo: '¿Restaurar este respaldo?',
-            texto: `Se cargan ${resumen}${datos.descartados ? ` (${datos.descartados} movimientos inválidos se omiten)` : ''}. Tus datos actuales se reemplazan.`,
+            texto: `Se cargan ${resumen}${datos.descartados ? ` (${datos.descartados} movimientos inválidos se omiten)` : ''}. `
+                + (enNube ? 'Los datos de tu usuario se reemplazan en todos los dispositivos.' : 'Tus datos actuales se reemplazan.'),
             aceptar: 'Restaurar',
             peligro: true
         });
         if (!ok) return;
-        reemplazarDatos(datos);
+        try {
+            await reemplazarDatos(datos);
+        } catch (error) {
+            return avisarError(error);
+        }
         periodo = periodoActual();
         renderizarTodo();
         mostrarToast('Respaldo restaurado');
     });
     $('btnBorrarTodo').addEventListener('click', async () => {
+        const enNube = modoActual() === 'nube';
         const ok = await confirmar({
             titulo: '¿Borrar todos los datos?',
-            texto: 'Se eliminan tus cuentas, categorías y movimientos de este navegador. Si querés conservarlos, descargá un respaldo antes.',
+            texto: enNube
+                ? 'Se eliminan las cuentas, categorías y movimientos de tu usuario, en todos los dispositivos. Si querés conservarlos, descargá un respaldo antes.'
+                : 'Se eliminan tus cuentas, categorías y movimientos de este navegador. Si querés conservarlos, descargá un respaldo antes.',
             aceptar: 'Borrar todo',
             peligro: true
         });
         if (!ok) return;
-        await reiniciarDatos();
+        try {
+            await reiniciarDatos();
+        } catch (error) {
+            return avisarError(error);
+        }
         periodo = periodoActual();
         renderizarTodo();
         mostrarToast('Datos borrados');
+    });
+}
+
+// ===== Modo nube: indicadores y Ajustes =====
+function renderizarModo() {
+    const enNube = modoActual() === 'nube';
+    $('bannerSinConexion').hidden = !esSoloLectura();
+    document.querySelectorAll('[data-solo-local]').forEach(el => { el.hidden = enNube; });
+    $('textoDatos').textContent = enNube
+        ? 'Tus datos se guardan en la nube y se ven en cada dispositivo donde ingreses con tu usuario. Igual podés descargar un respaldo cuando quieras.'
+        : 'Walletera guarda todo en este navegador: nada sale de tu dispositivo. Descargá un respaldo de vez en cuando.';
+    renderizarUsuario();
+}
+
+const filaAjuste = (accion, icono, tono, nombre, meta, peligro = false) => `
+    <li>
+        <button class="fila" type="button" data-usuario="${accion}">
+            ${tile(icono, tono)}
+            <span class="fila-texto">
+                <span class="fila-nombre ${peligro ? 'negativo' : ''}">${nombre}</span>
+                ${meta ? `<span class="fila-meta">${meta}</span>` : ''}
+            </span>
+        </button>
+    </li>`;
+
+function renderizarUsuario() {
+    const enNube = modoActual() === 'nube';
+    // Sin backend (la demo publicada sin base, un preview) este grupo no aparece.
+    $('grupoUsuario').hidden = !enNube && !nube.disponible;
+    if (enNube) {
+        $('textoUsuario').textContent = `Ingresaste como ${emailActual()}. Usá el mismo usuario en cada dispositivo de la casa: todos ven y cargan los mismos datos.`;
+        $('opcionesUsuario').innerHTML = [
+            filaAjuste('clave', 'ph-key', 'amarillo', 'Cambiar contraseña', 'Cierra la sesión en los demás dispositivos'),
+            filaAjuste('salir', 'ph-sign-out', 'gris', 'Cerrar sesión', 'En este dispositivo'),
+            filaAjuste('salir-todos', 'ph-devices', 'rosa', 'Cerrar sesión en todos los dispositivos', 'Por si perdiste un celular', true)
+        ].join('');
+    } else {
+        $('textoUsuario').textContent = 'Estás usando Walletera sin cuenta: los datos quedan solo en este navegador.';
+        $('opcionesUsuario').innerHTML = filaAjuste('ingresar', 'ph-cloud-arrow-up', 'verde', 'Iniciar sesión',
+            'Guardá los datos en la nube y compartilos con tu casa');
+    }
+}
+
+// ===== Acceso: ingresar, crear usuario, salir =====
+let modoAcceso = 'ingresar';   // 'ingresar' | 'registrar'
+
+function elegirModoAcceso(modo) {
+    modoAcceso = modo === 'registrar' && nube.registroAbierto ? 'registrar' : 'ingresar';
+    const registrar = modoAcceso === 'registrar';
+    $('pestanasAcceso').hidden = !nube.registroAbierto;
+    $('pestanasAcceso').querySelectorAll('[data-acceso]').forEach(btn => {
+        const activa = btn.dataset.acceso === modoAcceso;
+        btn.classList.toggle('activa', activa);
+        btn.setAttribute('aria-pressed', String(activa));
+    });
+    $('tituloAcceso').textContent = registrar ? 'Crear usuario' : 'Ingresar';
+    $('campoCodigo').hidden = !registrar;
+    $('accesoClave').autocomplete = registrar ? 'new-password' : 'current-password';
+    $('btnAcceso').textContent = registrar ? 'Crear usuario' : 'Ingresar';
+}
+
+// bloqueante: la sesión de este dispositivo venció; no se puede cerrar sin ingresar
+// o elegir explícitamente usar la app sin cuenta.
+function abrirModalAcceso({ bloqueante = false, motivo = '' } = {}) {
+    const modal = $('modalAcceso');
+    if (modal.classList.contains('activo')) return;
+    $('formAcceso').reset();
+    $('formAcceso').querySelectorAll('[aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
+    $('motivoAcceso').textContent = motivo;
+    $('motivoAcceso').hidden = !motivo;
+    modal.querySelectorAll('[data-cerrar]').forEach(el => { el.hidden = bloqueante && el.matches('button'); });
+    $('btnUsarSinCuenta').hidden = !bloqueante;
+    if (bloqueante) modal.dataset.bloqueante = 'true';
+    elegirModoAcceso('ingresar');
+    abrirModal('modalAcceso', $('accesoEmail'));
+}
+
+function configurarAcceso() {
+    $('pestanasAcceso').addEventListener('click', e => {
+        const btn = e.target.closest('[data-acceso]');
+        if (btn) elegirModoAcceso(btn.dataset.acceso);
+    });
+    $('formAcceso').addEventListener('submit', async e => {
+        e.preventDefault();
+        const email = $('accesoEmail').value.trim();
+        const clave = $('accesoClave').value;
+        const codigo = $('accesoCodigo').value.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return errorEnCampo($('accesoEmail'), 'Escribí un email válido');
+        if (!clave) return errorEnCampo($('accesoClave'), 'Escribí tu contraseña');
+        if (modoAcceso === 'registrar') {
+            if (clave.length < 8) return errorEnCampo($('accesoClave'), 'La contraseña tiene que tener al menos 8 caracteres');
+            if (!codigo) return errorEnCampo($('accesoCodigo'), 'Escribí el código de registro');
+        }
+        // Lo que había en este navegador, por si conviene subirlo a la nube.
+        const datosLocales = modoActual() === 'local' && hayMovimientos() ? exportarRespaldo() : null;
+        try {
+            await conBotonOcupado($('btnAcceso'), async () => {
+                if (modoAcceso === 'registrar') await api.registrarse(email, clave, codigo);
+                else await api.ingresar(email, clave);
+                await inicializarDatos({ modo: 'nube', api });
+            });
+        } catch (error) {
+            return avisarError(error);
+        }
+        guardarPreferencia(CLAVE_MODO, 'nube');
+        ultimaSincronizacion = Date.now();
+        cerrarModal('modalAcceso', { forzar: true });
+        periodo = periodoActual();
+        rangoActual = null;
+        renderizarTodo();
+        mostrarToast(`Ingresaste como ${emailActual()}`);
+        await ofrecerSubirDatosLocales(datosLocales);
+    });
+    $('btnUsarSinCuenta').addEventListener('click', () => {
+        guardarPreferencia(CLAVE_MODO, 'local');
+        cerrarModal('modalAcceso', { forzar: true });
+        renderizarTodo();
+        mostrarToast('Estás usando Walletera sin cuenta en este dispositivo');
+    });
+    $('opcionesUsuario').addEventListener('click', e => {
+        const accion = e.target.closest('[data-usuario]')?.dataset.usuario;
+        if (accion === 'ingresar') abrirModalAcceso();
+        else if (accion === 'clave') abrirModalClave();
+        else if (accion === 'salir') salirDeLaNube({ todos: false });
+        else if (accion === 'salir-todos') salirDeLaNube({ todos: true });
+    });
+    configurarCambioDeClave();
+}
+
+// Si en este navegador había movimientos y el usuario de la nube todavía no tiene ninguno,
+// se ofrece subirlos (salvo que sean los datos de ejemplo de la demo).
+async function ofrecerSubirDatosLocales(respaldo) {
+    if (!respaldo || hayMovimientos()) return;
+    if (respaldo.cuentas.every(c => c.id.startsWith('ejemplo-'))) return;
+    const cantidad = respaldo.movimientos.length;
+    const ok = await confirmar({
+        titulo: '¿Subir los datos de este navegador?',
+        texto: `En este navegador hay ${cantidad} ${cantidad === 1 ? 'movimiento' : 'movimientos'} y tu usuario todavía no tiene ninguno. Si los subís, van a estar en todos tus dispositivos.`,
+        aceptar: 'Subir datos'
+    });
+    if (!ok) return;
+    try {
+        await reemplazarDatos(respaldo);
+    } catch (error) {
+        return avisarError(error);
+    }
+    renderizarTodo();
+    mostrarToast('Datos subidos a tu usuario');
+}
+
+async function salirDeLaNube({ todos }) {
+    if (todos) {
+        const ok = await confirmar({
+            titulo: '¿Cerrar sesión en todos los dispositivos?',
+            texto: 'Vas a tener que ingresar de nuevo en cada celular y computadora, incluido este.',
+            aceptar: 'Cerrar en todos',
+            peligro: true
+        });
+        if (!ok) return;
+    }
+    try {
+        await (todos ? api.salirDeTodos() : api.salir());
+    } catch (error) {
+        // Si la sesión ya no existía en el servidor, igual se sale acá.
+        if (error.estado !== 401) return avisarError(error);
+    }
+    await volverAModoLocal('Cerraste sesión. Ahora estás usando Walletera sin cuenta en este dispositivo.');
+}
+
+// Deja el dispositivo en modo local y borra la copia de los datos de la nube.
+async function volverAModoLocal(aviso) {
+    borrarCopiaNube();
+    guardarPreferencia(CLAVE_MODO, 'local');
+    await inicializarDatos();
+    periodo = periodoActual();
+    rangoActual = null;
+    renderizarTodo();
+    if (aviso) mostrarToast(aviso);
+}
+
+// ===== Cambiar contraseña =====
+function abrirModalClave() {
+    $('formClave').reset();
+    $('formClave').querySelectorAll('[aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
+    abrirModal('modalClave', $('claveActual'));
+}
+
+function configurarCambioDeClave() {
+    $('formClave').addEventListener('submit', async e => {
+        e.preventDefault();
+        const actual = $('claveActual').value;
+        const nueva = $('claveNueva').value;
+        if (!actual) return errorEnCampo($('claveActual'), 'Escribí tu contraseña actual');
+        if (nueva.length < 8) return errorEnCampo($('claveNueva'), 'La contraseña nueva tiene que tener al menos 8 caracteres');
+        if (nueva !== $('claveRepetida').value) return errorEnCampo($('claveRepetida'), 'Las contraseñas no coinciden');
+        try {
+            await conBotonOcupado($('formClave').querySelector('[type=submit]'), () => api.cambiarClave(actual, nueva));
+        } catch (error) {
+            if (error.estado === 403) return errorEnCampo($('claveActual'), error.message);
+            return avisarError(error);
+        }
+        cerrarModal('modalClave');
+        mostrarToast('Contraseña cambiada. Los demás dispositivos tienen que ingresar de nuevo.');
+    });
+}
+
+// ===== Sincronización entre dispositivos =====
+// Al volver a la app (si pasó más de un minuto) se traen los cambios del otro dispositivo.
+// Sin conexión se ve la última copia; al volver la conexión, se actualiza sola.
+async function sincronizar() {
+    if (modoActual() !== 'nube') return;
+    try {
+        await recargar();
+        ultimaSincronizacion = Date.now();
+        renderizarTodo();
+    } catch { /* sin conexión: sigue la copia; si la sesión venció, lo maneja su evento */ }
+}
+
+function configurarSincronizacion() {
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && Date.now() - ultimaSincronizacion > RECARGAR_CADA) sincronizar();
+    });
+    window.addEventListener('online', () => {
+        if (esSoloLectura()) sincronizar();
+    });
+    window.addEventListener(api.EVENTO_SESION_VENCIDA, async () => {
+        if (modoActual() !== 'nube') return;
+        await volverAModoLocal();
+        guardarPreferencia(CLAVE_MODO, 'nube');   // este dispositivo sigue siendo "de la nube"
+        modalesAbiertos.slice().forEach(m => cerrarModal(m.id, { forzar: true }));
+        abrirModalAcceso({ bloqueante: true, motivo: 'Tu sesión se cerró. Ingresá de nuevo para seguir con los datos de tu casa.' });
     });
 }

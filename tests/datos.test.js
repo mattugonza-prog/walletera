@@ -13,7 +13,7 @@ const nbsp = texto => texto.replace(/\u00a0/g, ' ');
 async function conDosCuentas() {
     const d = await cargarDatos();
     const efectivo = d.obtenerCuentas()[0];
-    const banco = d.crearCuenta({ nombre: 'Banco', tipo: 'banco', saldoInicial: 100000 });
+    const banco = await d.crearCuenta({ nombre: 'Banco', tipo: 'banco', saldoInicial: 100000 });
     const comida = d.obtenerCategorias('gasto').find(c => c.nombre === 'Alimentación');
     const sueldo = d.obtenerCategorias('ingreso').find(c => c.nombre === 'Sueldo');
     return { d, efectivo, banco, comida, sueldo };
@@ -33,9 +33,9 @@ describe('primera carga', () => {
 describe('saldos y resumen', () => {
     it('calcula el saldo de cada cuenta con gastos, ingresos y transferencias', async () => {
         const { d, efectivo, banco, comida, sueldo } = await conDosCuentas();
-        d.crearMovimiento({ descripcion: 'Super', monto: 1550.5, tipo: 'gasto', fecha: '2026-10-22', cuentaId: banco.id, categoriaId: comida.id });
-        d.crearMovimiento({ descripcion: 'Sueldo', monto: 200000, tipo: 'ingreso', fecha: '2026-10-01', cuentaId: efectivo.id, categoriaId: sueldo.id });
-        d.crearMovimiento({ descripcion: '', monto: 50000, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
+        await d.crearMovimiento({ descripcion: 'Super', monto: 1550.5, tipo: 'gasto', fecha: '2026-10-22', cuentaId: banco.id, categoriaId: comida.id });
+        await d.crearMovimiento({ descripcion: 'Sueldo', monto: 200000, tipo: 'ingreso', fecha: '2026-10-01', cuentaId: efectivo.id, categoriaId: sueldo.id });
+        await d.crearMovimiento({ descripcion: '', monto: 50000, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
 
         const saldos = Object.fromEntries(d.obtenerCuentasConSaldo().map(c => [c.nombre, c.saldo]));
         expect(saldos).toEqual({ Efectivo: 250000, Banco: 48449.5 });
@@ -44,26 +44,26 @@ describe('saldos y resumen', () => {
 
     it('las transferencias no cuentan como ingreso ni gasto', async () => {
         const { d, efectivo, banco } = await conDosCuentas();
-        d.crearMovimiento({ descripcion: '', monto: 50000, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
+        await d.crearMovimiento({ descripcion: '', monto: 50000, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
         expect(d.calcularResumen('2026-10')).toMatchObject({ ingresos: 0, gastos: 0, resultado: 0, cantidad: 1 });
     });
 
     it('una transferencia sin descripción se llama "Transferencia" y no lleva categoría', async () => {
         const { d, efectivo, banco, comida } = await conDosCuentas();
-        const t = d.crearMovimiento({ descripcion: '  ', monto: 10, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id, categoriaId: comida.id });
+        const t = await d.crearMovimiento({ descripcion: '  ', monto: 10, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id, categoriaId: comida.id });
         expect(t).toMatchObject({ descripcion: 'Transferencia', categoriaId: null });
     });
 
     it('descarta una categoría que no corresponde al tipo del movimiento', async () => {
         const { d, efectivo, comida } = await conDosCuentas();
-        const m = d.crearMovimiento({ descripcion: 'Venta', monto: 10, tipo: 'ingreso', fecha: '2026-10-05', cuentaId: efectivo.id, categoriaId: comida.id });
+        const m = await d.crearMovimiento({ descripcion: 'Venta', monto: 10, tipo: 'ingreso', fecha: '2026-10-05', cuentaId: efectivo.id, categoriaId: comida.id });
         expect(m.categoriaId).toBeNull();
     });
 
     it('filtra por período y compara con el mes anterior', async () => {
         const { d, efectivo, comida } = await conDosCuentas();
-        d.crearMovimiento({ descripcion: 'Sept', monto: 1000, tipo: 'gasto', fecha: '2026-09-10', cuentaId: efectivo.id, categoriaId: comida.id });
-        d.crearMovimiento({ descripcion: 'Oct', monto: 1500, tipo: 'gasto', fecha: '2026-10-10', cuentaId: efectivo.id, categoriaId: comida.id });
+        await d.crearMovimiento({ descripcion: 'Sept', monto: 1000, tipo: 'gasto', fecha: '2026-09-10', cuentaId: efectivo.id, categoriaId: comida.id });
+        await d.crearMovimiento({ descripcion: 'Oct', monto: 1500, tipo: 'gasto', fecha: '2026-10-10', cuentaId: efectivo.id, categoriaId: comida.id });
         expect(d.calcularResumen('2026-10').gastos).toBe(1500);
         expect(d.calcularResumen('2026-09').gastos).toBe(1000);
         expect(d.calcularVariacionGastos('2026-10')).toBe(50);
@@ -73,15 +73,15 @@ describe('saldos y resumen', () => {
 
     it('el promedio diario usa los días transcurridos del mes en curso', async () => {
         const { d, efectivo } = await conDosCuentas();
-        d.crearMovimiento({ descripcion: 'A', monto: 2200, tipo: 'gasto', fecha: '2026-10-03', cuentaId: efectivo.id });
-        d.crearMovimiento({ descripcion: 'B', monto: 3000, tipo: 'gasto', fecha: '2026-09-03', cuentaId: efectivo.id });
+        await d.crearMovimiento({ descripcion: 'A', monto: 2200, tipo: 'gasto', fecha: '2026-10-03', cuentaId: efectivo.id });
+        await d.crearMovimiento({ descripcion: 'B', monto: 3000, tipo: 'gasto', fecha: '2026-09-03', cuentaId: efectivo.id });
         expect(d.calcularPromedioDiario('2026-10')).toBe(100);
         expect(d.calcularPromedioDiario('2026-09')).toBe(100);
     });
 
     it('arma la serie de los últimos meses del más viejo al más nuevo', async () => {
         const { d, efectivo, sueldo } = await conDosCuentas();
-        d.crearMovimiento({ descripcion: 'S', monto: 900, tipo: 'ingreso', fecha: '2026-08-01', cuentaId: efectivo.id, categoriaId: sueldo.id });
+        await d.crearMovimiento({ descripcion: 'S', monto: 900, tipo: 'ingreso', fecha: '2026-08-01', cuentaId: efectivo.id, categoriaId: sueldo.id });
         const serie = d.calcularSerieMensual('2026-10', 3);
         expect(serie.map(s => s.periodo)).toEqual(['2026-08', '2026-09', '2026-10']);
         expect(serie[0]).toMatchObject({ ingresos: 900, gastos: 0 });
@@ -91,26 +91,26 @@ describe('saldos y resumen', () => {
 describe('integridad', () => {
     it('eliminar una categoría conserva sus movimientos como "Sin categoría"', async () => {
         const { d, efectivo, comida } = await conDosCuentas();
-        const m = d.crearMovimiento({ descripcion: 'Super', monto: 100, tipo: 'gasto', fecha: '2026-10-10', cuentaId: efectivo.id, categoriaId: comida.id });
+        const m = await d.crearMovimiento({ descripcion: 'Super', monto: 100, tipo: 'gasto', fecha: '2026-10-10', cuentaId: efectivo.id, categoriaId: comida.id });
         const saldoAntes = d.calcularSaldoTotal();
-        d.eliminarCategoria(comida.id);
+        await d.eliminarCategoria(comida.id);
         expect(d.obtenerMovimientoPorId(m.id).categoriaId).toBeNull();
         expect(d.calcularSaldoTotal()).toBe(saldoAntes);
     });
 
     it('no elimina una cuenta que tiene movimientos', async () => {
         const { d, efectivo, banco } = await conDosCuentas();
-        d.crearMovimiento({ descripcion: '', monto: 10, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
-        expect(d.eliminarCuenta(efectivo.id)).toBe(false);
-        const vacia = d.crearCuenta({ nombre: 'Vacía', tipo: 'billetera', saldoInicial: 0 });
-        expect(d.eliminarCuenta(vacia.id)).toBe(true);
+        await d.crearMovimiento({ descripcion: '', monto: 10, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
+        expect(await d.eliminarCuenta(efectivo.id)).toBe(false);
+        const vacia = await d.crearCuenta({ nombre: 'Vacía', tipo: 'billetera', saldoInicial: 0 });
+        expect(await d.eliminarCuenta(vacia.id)).toBe(true);
     });
 
     it('agrupa por día con el neto y marca los días con solo transferencias', async () => {
         const { d, efectivo, banco } = await conDosCuentas();
-        d.crearMovimiento({ descripcion: 'A', monto: 100, tipo: 'gasto', fecha: '2026-10-22', cuentaId: efectivo.id });
-        d.crearMovimiento({ descripcion: 'B', monto: 300, tipo: 'ingreso', fecha: '2026-10-22', cuentaId: efectivo.id });
-        d.crearMovimiento({ descripcion: '', monto: 50, tipo: 'transferencia', fecha: '2026-10-21', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
+        await d.crearMovimiento({ descripcion: 'A', monto: 100, tipo: 'gasto', fecha: '2026-10-22', cuentaId: efectivo.id });
+        await d.crearMovimiento({ descripcion: 'B', monto: 300, tipo: 'ingreso', fecha: '2026-10-22', cuentaId: efectivo.id });
+        await d.crearMovimiento({ descripcion: '', monto: 50, tipo: 'transferencia', fecha: '2026-10-21', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
         const grupos = d.agruparPorDia(d.obtenerMovimientos('2026-10'));
         expect(grupos.map(g => [g.fecha, g.neto, g.soloTransferencias])).toEqual([
             ['2026-10-22', 200, false],
@@ -123,12 +123,12 @@ describe('rango de fechas', () => {
     async function conMovimientos() {
         const base = await conDosCuentas();
         const { d, efectivo, banco, comida, sueldo } = base;
-        d.crearMovimiento({ descripcion: 'Super agosto', monto: 100, tipo: 'gasto', fecha: '2026-08-31', cuentaId: efectivo.id, categoriaId: comida.id });
-        d.crearMovimiento({ descripcion: 'Super septiembre', monto: 200, tipo: 'gasto', fecha: '2026-09-15', cuentaId: efectivo.id, categoriaId: comida.id });
-        d.crearMovimiento({ descripcion: 'Sueldo', monto: 1000, tipo: 'ingreso', fecha: '2026-10-01', cuentaId: banco.id, categoriaId: sueldo.id });
-        d.crearMovimiento({ descripcion: '', monto: 300, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
-        d.crearMovimiento({ descripcion: 'Farmacia', monto: 50.5, tipo: 'gasto', fecha: '2026-11-10', cuentaId: efectivo.id });
-        d.crearMovimiento({ descripcion: 'Super noviembre', monto: 70, tipo: 'gasto', fecha: '2026-11-11', cuentaId: efectivo.id, categoriaId: comida.id });
+        await d.crearMovimiento({ descripcion: 'Super agosto', monto: 100, tipo: 'gasto', fecha: '2026-08-31', cuentaId: efectivo.id, categoriaId: comida.id });
+        await d.crearMovimiento({ descripcion: 'Super septiembre', monto: 200, tipo: 'gasto', fecha: '2026-09-15', cuentaId: efectivo.id, categoriaId: comida.id });
+        await d.crearMovimiento({ descripcion: 'Sueldo', monto: 1000, tipo: 'ingreso', fecha: '2026-10-01', cuentaId: banco.id, categoriaId: sueldo.id });
+        await d.crearMovimiento({ descripcion: '', monto: 300, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
+        await d.crearMovimiento({ descripcion: 'Farmacia', monto: 50.5, tipo: 'gasto', fecha: '2026-11-10', cuentaId: efectivo.id });
+        await d.crearMovimiento({ descripcion: 'Super noviembre', monto: 70, tipo: 'gasto', fecha: '2026-11-11', cuentaId: efectivo.id, categoriaId: comida.id });
         return base;
     }
     const rango = { desde: '2026-09-15', hasta: '2026-11-10' };
@@ -175,7 +175,7 @@ describe('presupuesto por mes', () => {
 
     it('cambiarlo en un mes no altera los meses anteriores', async () => {
         const { d, comida } = await conDosCuentas();
-        editar(d, comida, 200000, '2026-10');
+        await editar(d, comida, 200000, '2026-10');
         expect(d.presupuestoDe(comida, '2026-09')).toBe(150000);
         expect(d.presupuestoDe(comida, '2026-10')).toBe(200000);
         expect(d.presupuestoDe(comida, '2026-12')).toBe(200000);
@@ -187,21 +187,21 @@ describe('presupuesto por mes', () => {
 
     it('editar solo el nombre no agrega una vigencia nueva', async () => {
         const { d, comida } = await conDosCuentas();
-        d.editarCategoria(comida.id, { nombre: 'Comida', icono: comida.icono, color: comida.color, presupuesto: 150000 }, '2026-05');
+        await d.editarCategoria(comida.id, { nombre: 'Comida', icono: comida.icono, color: comida.color, presupuesto: 150000 }, '2026-05');
         expect(d.obtenerCategoriaPorId(comida.id)).toMatchObject({ nombre: 'Comida', presupuestos: [{ desde: '2000-01', monto: 150000 }] });
     });
 
     it('una categoría nueva tiene presupuesto desde el mes en que se crea', async () => {
         const d = await cargarDatos();
-        const gym = d.crearCategoria({ nombre: 'Gimnasio', icono: 'ph-barbell', color: 'turquesa', presupuesto: 5000, tipo: 'gasto' }, '2026-10');
+        const gym = await d.crearCategoria({ nombre: 'Gimnasio', icono: 'ph-barbell', color: 'turquesa', presupuesto: 5000, tipo: 'gasto' }, '2026-10');
         expect(d.presupuestoDe(gym, '2026-09')).toBe(0);
         expect(d.presupuestoDe(gym, '2026-10')).toBe(5000);
     });
 
     it('volver al monto anterior no deja vigencias repetidas', async () => {
         const { d, comida } = await conDosCuentas();
-        editar(d, comida, 200000, '2026-10');
-        editar(d, comida, 150000, '2026-10');
+        await editar(d, comida, 200000, '2026-10');
+        await editar(d, comida, 150000, '2026-10');
         expect(d.obtenerCategoriaPorId(comida.id).presupuestos).toEqual([{ desde: '2000-01', monto: 150000 }]);
     });
 });
@@ -209,8 +209,8 @@ describe('presupuesto por mes', () => {
 describe('montos', () => {
     it('las sumas no acumulan error de punto flotante', async () => {
         const { d, efectivo } = await conDosCuentas();
-        d.crearMovimiento({ descripcion: 'A', monto: 0.1, tipo: 'gasto', fecha: '2026-10-01', cuentaId: efectivo.id });
-        d.crearMovimiento({ descripcion: 'B', monto: 0.2, tipo: 'gasto', fecha: '2026-10-01', cuentaId: efectivo.id });
+        await d.crearMovimiento({ descripcion: 'A', monto: 0.1, tipo: 'gasto', fecha: '2026-10-01', cuentaId: efectivo.id });
+        await d.crearMovimiento({ descripcion: 'B', monto: 0.2, tipo: 'gasto', fecha: '2026-10-01', cuentaId: efectivo.id });
         expect(d.calcularResumen('2026-10').gastos).toBe(0.3);
         expect(d.obtenerCuentasConSaldo().find(c => c.id === efectivo.id).saldo).toBe(-0.3);
         expect(d.agruparPorDia(d.obtenerMovimientos('2026-10'))[0].neto).toBe(-0.3);
@@ -274,13 +274,13 @@ describe('migraciones', () => {
 describe('respaldo y exportación', () => {
     it('un respaldo exportado se puede volver a importar igual', async () => {
         const { d, efectivo, banco, comida } = await conDosCuentas();
-        d.crearMovimiento({ descripcion: 'Super', monto: 100, tipo: 'gasto', fecha: '2026-10-10', cuentaId: efectivo.id, categoriaId: comida.id });
-        d.crearMovimiento({ descripcion: '', monto: 10, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
+        await d.crearMovimiento({ descripcion: 'Super', monto: 100, tipo: 'gasto', fecha: '2026-10-10', cuentaId: efectivo.id, categoriaId: comida.id });
+        await d.crearMovimiento({ descripcion: '', monto: 10, tipo: 'transferencia', fecha: '2026-10-05', cuentaId: banco.id, cuentaDestinoId: efectivo.id });
         const respaldo = JSON.parse(JSON.stringify(d.exportarRespaldo()));
         const saldo = d.calcularSaldoTotal();
 
         const otra = await cargarDatos();
-        const resultado = otra.reemplazarDatos(respaldo);
+        const resultado = await otra.reemplazarDatos(respaldo);
         expect(resultado.descartados).toBe(0);
         expect(otra.calcularSaldoTotal()).toBe(saldo);
         expect(otra.obtenerMovimientos()).toHaveLength(2);
@@ -305,7 +305,7 @@ describe('respaldo y exportación', () => {
 
     it('exporta CSV para Excel en español y neutraliza fórmulas', async () => {
         const { d, efectivo } = await conDosCuentas();
-        d.crearMovimiento({ descripcion: '=HYPERLINK("x")', monto: 1550.5, tipo: 'gasto', fecha: '2026-10-10', cuentaId: efectivo.id });
+        await d.crearMovimiento({ descripcion: '=HYPERLINK("x")', monto: 1550.5, tipo: 'gasto', fecha: '2026-10-10', cuentaId: efectivo.id });
         const [encabezado, fila] = d.exportarCSV().split('\r\n');
         expect(encabezado).toBe('Fecha;Tipo;Descripción;Monto;Cuenta;Cuenta destino;Categoría');
         expect(fila).toBe('2026-10-10;Gasto;"\'=HYPERLINK(""x"")";-1550,50;Efectivo;;');
@@ -358,7 +358,7 @@ describe('recurrentes', () => {
 
     it('registra las ocurrencias vencidas hasta hoy, incluidas las atrasadas', async () => {
         const { d, efectivo } = await conDosCuentas();
-        const r = d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-08-03' }), 'mensual');
+        const r = await d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-08-03' }), 'mensual');
         const fechas = d.obtenerMovimientos().map(m => m.fecha);
         expect(fechas).toEqual(['2026-10-03', '2026-09-03', '2026-08-03']);
         expect(d.obtenerMovimientos().every(m => m.recurrenteId === r.id)).toBe(true);
@@ -367,7 +367,7 @@ describe('recurrentes', () => {
 
     it('no duplica al volver a abrir la app', async () => {
         const { d, efectivo } = await conDosCuentas();
-        d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-09-15' }), 'mensual');
+        await d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-09-15' }), 'mensual');
         vi.resetModules();
         const otra = await import('../js/datos.js');
         await otra.inicializarDatos();
@@ -380,48 +380,48 @@ describe('recurrentes', () => {
     it('los mensuales del 31 caen el último día de los meses cortos y vuelven al 31', async () => {
         vi.setSystemTime(new Date(2027, 2, 31, 12));
         const { d, efectivo } = await conDosCuentas();
-        d.crearRecurrente(plantilla(efectivo.id, { fecha: '2027-01-31' }), 'mensual');
+        await d.crearRecurrente(plantilla(efectivo.id, { fecha: '2027-01-31' }), 'mensual');
         expect(d.obtenerMovimientos().map(m => m.fecha).reverse()).toEqual(['2027-01-31', '2027-02-28', '2027-03-31']);
     });
 
     it('los semanales se repiten cada 7 días y uno con fecha futura todavía no registra nada', async () => {
         const { d, efectivo } = await conDosCuentas();
-        d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-08' }), 'semanal');
+        await d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-08' }), 'semanal');
         expect(d.obtenerMovimientos().map(m => m.fecha)).toEqual(['2026-10-22', '2026-10-15', '2026-10-08']);
-        d.crearRecurrente(plantilla(efectivo.id, { descripcion: 'Gym', fecha: '2026-11-01' }), 'mensual');
+        await d.crearRecurrente(plantilla(efectivo.id, { descripcion: 'Gym', fecha: '2026-11-01' }), 'mensual');
         expect(d.obtenerMovimientos()).toHaveLength(3);
         expect(d.obtenerProximosVencimientos(30).map(v => v.fecha)).toEqual(['2026-10-29', '2026-11-01']);
     });
 
     it('editar cambia las próximas ocurrencias y no permite fechas ya registradas', async () => {
         const { d, efectivo } = await conDosCuentas();
-        const r = d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-03' }), 'mensual');
-        expect(() => d.editarRecurrente(r.id, plantilla(efectivo.id, { fecha: '2026-10-03' }), 'mensual')).toThrow('posterior');
-        d.editarRecurrente(r.id, plantilla(efectivo.id, { monto: 1500, fecha: '2026-11-10' }), 'mensual');
+        const r = await d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-03' }), 'mensual');
+        await expect(d.editarRecurrente(r.id, plantilla(efectivo.id, { fecha: '2026-10-03' }), 'mensual')).rejects.toThrow('posterior');
+        await d.editarRecurrente(r.id, plantilla(efectivo.id, { monto: 1500, fecha: '2026-11-10' }), 'mensual');
         expect(d.obtenerMovimientos()[0].monto).toBe(1000);
         expect(d.obtenerProximosVencimientos(30)).toMatchObject([{ fecha: '2026-11-10', recurrente: { monto: 1500 } }]);
     });
 
     it('eliminar conserva los movimientos registrados y bloquea borrar su cuenta mientras exista', async () => {
         const { d, banco } = await conDosCuentas();
-        const r = d.crearRecurrente(plantilla(banco.id, { fecha: '2026-11-01' }), 'mensual');
+        const r = await d.crearRecurrente(plantilla(banco.id, { fecha: '2026-11-01' }), 'mensual');
         expect(d.contarRecurrentesDeCuenta(banco.id)).toBe(1);
-        expect(d.eliminarCuenta(banco.id)).toBe(false);
-        d.eliminarRecurrente(r.id);
-        expect(d.eliminarCuenta(banco.id)).toBe(true);
+        expect(await d.eliminarCuenta(banco.id)).toBe(false);
+        await d.eliminarRecurrente(r.id);
+        expect(await d.eliminarCuenta(banco.id)).toBe(true);
 
         const { d: d2, efectivo } = await conDosCuentas();
-        const r2 = d2.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-01' }), 'mensual');
-        d2.eliminarRecurrente(r2.id);
+        const r2 = await d2.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-01' }), 'mensual');
+        await d2.eliminarRecurrente(r2.id);
         expect(d2.obtenerMovimientos()).toMatchObject([{ fecha: '2026-10-01', recurrenteId: null }]);
     });
 
     it('viajan en el respaldo y los respaldos viejos sin recurrentes siguen sirviendo', async () => {
         const { d, efectivo } = await conDosCuentas();
-        d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-03' }), 'mensual');
+        await d.crearRecurrente(plantilla(efectivo.id, { fecha: '2026-10-03' }), 'mensual');
         const respaldo = JSON.parse(JSON.stringify(d.exportarRespaldo()));
         const otra = await cargarDatos();
-        otra.reemplazarDatos(respaldo);
+        await otra.reemplazarDatos(respaldo);
         expect(otra.obtenerRecurrentes()).toHaveLength(1);
         expect(otra.obtenerMovimientos()).toHaveLength(1);
         expect(otra.obtenerMovimientos()[0].recurrenteId).toBe(otra.obtenerRecurrentes()[0].id);
@@ -429,7 +429,7 @@ describe('recurrentes', () => {
         const { recurrentes, ...viejo } = respaldo;
         expect(recurrentes).toHaveLength(1);
         const tercera = await cargarDatos();
-        expect(tercera.reemplazarDatos(viejo).recurrentes).toEqual([]);
+        expect((await tercera.reemplazarDatos(viejo)).recurrentes).toEqual([]);
     });
 
     it('los datos de ejemplo traen recurrentes sin duplicar lo ya registrado', async () => {

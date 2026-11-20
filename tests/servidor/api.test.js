@@ -22,7 +22,7 @@ describe.skipIf(!hayBase)('API', () => {
         it('sin CODIGO_REGISTRO el registro está cerrado', async () => {
             const n = navegador(appDePrueba({}).app);
             expect((await n.pedir('POST', '/usuario', { email: emailNuevo(), clave: CLAVE, codigo: 'x' })).status).toBe(403);
-            expect((await n.pedir('GET', '/sesion')).cuerpo).toMatchObject({ registroAbierto: false });
+            expect(await n.pedir('GET', '/sesion')).toMatchObject({ status: 200, cuerpo: { email: null, registroAbierto: false } });
         });
 
         it('con un código incorrecto no registra', async () => {

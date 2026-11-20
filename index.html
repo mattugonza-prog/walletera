@@ -19,14 +19,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="./vendor/phosphor/phosphor.css">
     <link rel="stylesheet" href="./css/estilos.css">
-    <script>
-        // Tema antes del primer pintado, para evitar el parpadeo. Oscuro por defecto.
-        try {
-            var tema = localStorage.getItem('walletera_tema');
-            document.documentElement.setAttribute('data-tema', tema === 'claro' ? 'claro' : 'oscuro');
-            if (localStorage.getItem('walletera_ocultar_montos') === '1') document.documentElement.classList.add('ocultar-montos');
-        } catch (e) { /* sin almacenamiento: queda el tema por defecto */ }
-    </script>
+    <script src="./js/tema.js"></script>
     <script type="module" src="./main.js"></script>
 </head>
 <body>

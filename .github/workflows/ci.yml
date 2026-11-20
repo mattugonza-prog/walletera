@@ -31,9 +31,10 @@ jobs:
       DATABASE_URL_TEST: postgres://walletera:walletera@localhost:5432/walletera_test
     steps:
       - uses: actions/checkout@v4
+      # La misma versión que usa Vercel ("engines" en package.json).
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run lint

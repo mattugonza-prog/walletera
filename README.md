@@ -97,6 +97,8 @@ Los cálculos (saldos, resúmenes, gráficos, búsqueda) se hacen en el navegado
 
 ## Cómo correrlo
 
+Necesita Node.js 24, la misma versión que usa Vercel.
+
 ```bash
 npm install
 npm start          # http://localhost:5173

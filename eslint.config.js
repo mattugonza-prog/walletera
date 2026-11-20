@@ -21,7 +21,7 @@ export default [
         languageOptions: { sourceType: 'script', globals: globals.serviceworker }
     },
     {
-        files: ['tests/**/*.js', '*.config.js'],
+        files: ['tests/**/*.js', '*.config.js', 'servidor/**/*.js', 'api/**/*.js', 'scripts/**/*.js'],
         languageOptions: { globals: globals.node }
     }
 ];

@@ -2,6 +2,14 @@
     "$schema": "https://openapi.vercel.sh/vercel.json",
     "buildCommand": "npm run build",
     "outputDirectory": "dist",
+    "functions": {
+        "api/index.js": {
+            "includeFiles": "categorias.json"
+        }
+    },
+    "rewrites": [
+        { "source": "/api/:ruta+", "destination": "/api?__ruta=:ruta+" }
+    ],
     "headers": [
         {
             "source": "/sw.js",

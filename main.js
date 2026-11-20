@@ -6,7 +6,7 @@ import {
     obtenerGruposIconos, primerIcono,
     obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
     contarMovimientosDeCuenta, contarRecurrentesDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
-    obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria,
+    obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria, presupuestoDe,
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
     buscarYFiltrar, agruparPorDia,
     obtenerRecurrentes, obtenerRecurrentePorId, crearRecurrente, editarRecurrente, eliminarRecurrente,
@@ -953,7 +953,8 @@ function abrirModalCategoria(id) {
     $('categoriaTipo').value = tipo;
     $('categoriaId').value = cat?.id ?? '';
     $('categoriaNombre').value = cat?.nombre ?? '';
-    $('categoriaPresupuesto').value = cat?.presupuesto ?? '';
+    $('categoriaPresupuesto').value = cat ? presupuestoDe(cat, periodo) : '';
+    $('ayudaPresupuesto').textContent = `Rige desde ${nombrePeriodo(periodo)}. Los meses anteriores conservan el suyo.`;
     $('campoPresupuesto').hidden = tipo === 'ingreso';
 
     $('selectorColores').innerHTML = COLORES_CATEGORIA.map(color => `
@@ -1010,10 +1011,10 @@ function configurarFormularioCategoria() {
         if (!nombre.trim()) return errorEnCampo($('categoriaNombre'), 'Escribí un nombre para la categoría');
         if (!Number.isFinite(presupuesto) || presupuesto < 0) return errorEnCampo($('categoriaPresupuesto'), 'Ingresá un presupuesto válido');
         if (id) {
-            editarCategoria(id, { nombre, icono, color, presupuesto });
+            editarCategoria(id, { nombre, icono, color, presupuesto }, periodo);
             mostrarToast('Categoría actualizada');
         } else {
-            crearCategoria({ nombre, icono, color, presupuesto, tipo });
+            crearCategoria({ nombre, icono, color, presupuesto, tipo }, periodo);
             mostrarToast('Categoría creada');
         }
         cerrarModal('modalCategoria');

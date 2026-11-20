@@ -1,6 +1,13 @@
 // ===== Walletera | datos.js =====
 // Capa de datos: estado, persistencia, migraciones y cálculos.
 import { generarDatosDeEjemplo } from './ejemplo.js';
+import {
+    TIPOS_CUENTA, COLORES_CATEGORIA,
+    generarId, redondearCentavos, pad, aFechaISO, desdeFechaISO, esFechaISO,
+    desplazarPeriodo, diasDelPeriodo, proximaFecha, ocurrenciasPendientes, aplicarEdicionRecurrente,
+    presupuestoDe, conPresupuesto,
+    normalizarCategoria, validarRespaldo
+} from './dominio.js';
 
 const CLAVES = {
     configuracion: 'walletera_configuracion',
@@ -12,16 +19,7 @@ const CLAVES = {
 };
 
 // Versión del esquema guardado. Cada salto tiene su paso en migrarDatos().
-const VERSION_DATOS = 5;
-
-const TIPOS_CUENTA = {
-    efectivo:  { nombre: 'Efectivo',           icono: 'ph-money' },
-    banco:     { nombre: 'Cuenta bancaria',    icono: 'ph-bank' },
-    billetera: { nombre: 'Billetera virtual',  icono: 'ph-device-mobile' },
-    credito:   { nombre: 'Tarjeta de crédito', icono: 'ph-credit-card' }
-};
-
-const COLORES_CATEGORIA = ['naranja', 'azul', 'rosa', 'verde', 'violeta', 'amarillo', 'turquesa', 'gris'];
+const VERSION_DATOS = 6;
 
 // Catálogo mínimo por si iconos.json no se puede cargar.
 const GRUPOS_ICONOS_FALLBACK = [
@@ -30,30 +28,6 @@ const GRUPOS_ICONOS_FALLBACK = [
     { grupo: 'Transporte', iconos: ['ph-car', 'ph-bus', 'ph-gas-pump'] },
     { grupo: 'Otros',      iconos: ['ph-heartbeat', 'ph-film-slate', 'ph-piggy-bank', 'ph-tag'] }
 ];
-
-// Hasta v4 las categorías usaban emojis; v5 los reemplaza por un ícono y un color.
-const EMOJI_A_ICONO = {
-    '🍔': ['ph-fork-knife', 'naranja'], '🍕': ['ph-fork-knife', 'naranja'], '🥗': ['ph-fork-knife', 'naranja'],
-    '🛒': ['ph-shopping-cart', 'naranja'], '🍎': ['ph-shopping-cart', 'naranja'], '🍞': ['ph-bread', 'naranja'],
-    '☕': ['ph-coffee', 'naranja'], '🍷': ['ph-wine', 'rosa'], '🍺': ['ph-wine', 'amarillo'],
-    '🏠': ['ph-house', 'violeta'], '🏡': ['ph-house', 'violeta'], '💡': ['ph-lightning', 'amarillo'],
-    '🔥': ['ph-flame', 'naranja'], '💧': ['ph-drop', 'azul'], '🛠️': ['ph-wrench', 'gris'], '📺': ['ph-film-slate', 'rosa'],
-    '🚗': ['ph-car', 'azul'], '🚙': ['ph-car', 'azul'], '⛽': ['ph-gas-pump', 'azul'], '🚌': ['ph-bus', 'azul'],
-    '🚕': ['ph-taxi', 'amarillo'], '🚆': ['ph-train', 'azul'], '🚇': ['ph-train', 'azul'], '✈️': ['ph-airplane', 'azul'],
-    '🚲': ['ph-bicycle', 'verde'],
-    '💊': ['ph-pill', 'turquesa'], '🏥': ['ph-first-aid', 'turquesa'], '🦷': ['ph-tooth', 'turquesa'],
-    '💪': ['ph-barbell', 'turquesa'], '🩺': ['ph-heartbeat', 'turquesa'],
-    '📚': ['ph-graduation-cap', 'amarillo'], '🎓': ['ph-graduation-cap', 'amarillo'], '📖': ['ph-book-open', 'amarillo'],
-    '💻': ['ph-laptop', 'azul'], '💼': ['ph-briefcase', 'verde'],
-    '🎬': ['ph-film-slate', 'rosa'], '🎮': ['ph-game-controller', 'rosa'], '🎵': ['ph-music-notes', 'rosa'],
-    '🎟️': ['ph-ticket', 'rosa'], '🏖️': ['ph-umbrella', 'turquesa'],
-    '👕': ['ph-t-shirt', 'violeta'], '👗': ['ph-t-shirt', 'violeta'], '👟': ['ph-shopping-bag', 'violeta'],
-    '👜': ['ph-shopping-bag', 'violeta'], '💇': ['ph-scissors', 'violeta'], '🛍️': ['ph-storefront', 'naranja'],
-    '🐶': ['ph-paw-print', 'naranja'], '🐱': ['ph-paw-print', 'naranja'], '🐾': ['ph-paw-print', 'naranja'],
-    '💰': ['ph-piggy-bank', 'verde'], '💵': ['ph-money', 'verde'], '💳': ['ph-credit-card', 'gris'],
-    '🏦': ['ph-bank', 'gris'], '📈': ['ph-chart-line-up', 'turquesa'], '🪙': ['ph-coins', 'amarillo'],
-    '🧾': ['ph-receipt', 'gris'], '🎁': ['ph-gift', 'rosa'], '❤️': ['ph-heart', 'rosa'], '⭐': ['ph-star', 'amarillo']
-};
 
 // ===== Estado en memoria =====
 let cuentas       = [];
@@ -81,46 +55,16 @@ const guardarCategorias  = () => escribir(CLAVES.categorias, categorias);
 const guardarMovimientos = () => escribir(CLAVES.movimientos, movimientos);
 const guardarRecurrentes = () => escribir(CLAVES.recurrentes, recurrentes);
 
-function generarId() {
-    if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
 // ===== Fechas =====
 // Las fechas de los movimientos se guardan como 'AAAA-MM-DD' (fecha local, sin hora)
 // para que no dependan de la zona horaria del navegador.
-const pad = n => String(n).padStart(2, '0');
-
-function aFechaISO(fecha) {
-    return `${fecha.getFullYear()}-${pad(fecha.getMonth() + 1)}-${pad(fecha.getDate())}`;
-}
-
 function fechaHoy() {
     return aFechaISO(new Date());
-}
-
-function esFechaISO(valor) {
-    return typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor);
-}
-
-function desdeFechaISO(fechaISO) {
-    const [a, m, d] = fechaISO.split('-').map(Number);
-    return new Date(a, m - 1, d);
 }
 
 // ===== Períodos ('AAAA-MM') =====
 function periodoActual() {
     return fechaHoy().slice(0, 7);
-}
-
-function desplazarPeriodo(periodo, meses) {
-    const [a, m] = periodo.split('-').map(Number);
-    return aFechaISO(new Date(a, m - 1 + meses, 1)).slice(0, 7);
-}
-
-function diasDelPeriodo(periodo) {
-    const [a, m] = periodo.split('-').map(Number);
-    return new Date(a, m, 0).getDate();
 }
 
 function nombrePeriodo(periodo) {
@@ -136,6 +80,7 @@ function nombrePeriodo(periodo) {
 // v4: cuentas con saldo inicial (reemplazan al "fondo mensual"), transferencias
 //     y categorías con tipo (gasto / ingreso).
 // v5: categorías con ícono de Phosphor y color en lugar de emoji.
+// v6: presupuesto con vigencia mensual ([{ desde: 'AAAA-MM', monto }]) en lugar de uno único.
 function timestampAFechaISO(ts) {
     const d = new Date(ts);
     // Los timestamps exactos a medianoche UTC vienen de new Date('AAAA-MM-DD'):
@@ -144,23 +89,6 @@ function timestampAFechaISO(ts) {
         return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
     }
     return aFechaISO(d);
-}
-
-function normalizarCategoria(c) {
-    if (!c || typeof c.nombre !== 'string' || !c.nombre.trim()) return null;
-    const presupuesto = Number(c.presupuesto ?? 0);
-    if (!Number.isFinite(presupuesto) || presupuesto < 0) return null;
-    const tipo = c.tipo === 'ingreso' ? 'ingreso' : 'gasto';
-    const esIcono = typeof c.icono === 'string' && /^ph-[a-z0-9-]+$/.test(c.icono);
-    const [iconoMigrado, colorMigrado] = esIcono ? [c.icono] : (EMOJI_A_ICONO[c.icono] ?? ['ph-tag', 'gris']);
-    return {
-        id: String(c.id ?? generarId()),
-        nombre: c.nombre.trim(),
-        icono: iconoMigrado,
-        color: COLORES_CATEGORIA.includes(c.color) ? c.color : (colorMigrado ?? 'gris'),
-        tipo,
-        presupuesto: tipo === 'gasto' ? presupuesto : 0
-    };
 }
 
 function normalizarMovimientoV3(m, idsCategorias) {
@@ -221,7 +149,8 @@ function migrarDatos() {
         configuracion: localStorage.getItem(CLAVES.configuracion),
         categorias: localStorage.getItem(CLAVES.categorias),
         cuentas: localStorage.getItem(CLAVES.cuentas),
-        movimientos: localStorage.getItem(CLAVES.movimientos)
+        movimientos: localStorage.getItem(CLAVES.movimientos),
+        recurrentes: localStorage.getItem(CLAVES.recurrentes)
     };
     if (Object.values(crudo).some(Boolean)) {
         // Copia intacta de lo que había antes de migrar, por si algo sale mal.
@@ -237,7 +166,8 @@ function migrarDatos() {
         escribir(CLAVES.categorias, v4.categorias);
         escribir(CLAVES.movimientos, v4.movimientos);
     }
-    // v4 → v5: emoji → ícono + color (normalizarCategoria hace la conversión).
+    // v4 → v5 → v6: emoji → ícono + color y presupuesto único → presupuesto con vigencia
+    // (normalizarCategoria hace las dos conversiones).
     escribir(CLAVES.categorias, leer(CLAVES.categorias, []).map(normalizarCategoria).filter(Boolean));
     localStorage.setItem(CLAVES.version, String(VERSION_DATOS));
     return { desde: version };
@@ -290,83 +220,6 @@ async function cargarCategoriasIniciales() {
 }
 
 // ===== Respaldo, importación y datos de ejemplo =====
-function normalizarCuenta(c) {
-    if (!c || typeof c.nombre !== 'string' || !c.nombre.trim()) return null;
-    const saldoInicial = Number(c.saldoInicial ?? 0);
-    if (!Number.isFinite(saldoInicial)) return null;
-    return {
-        id: String(c.id ?? generarId()),
-        nombre: c.nombre.trim(),
-        tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'efectivo',
-        saldoInicial
-    };
-}
-
-function normalizarMovimiento(m, idsCuentas, categoriasPorId, idsRecurrentes = new Set()) {
-    if (!m || typeof m.descripcion !== 'string' || !['gasto', 'ingreso', 'transferencia'].includes(m.tipo)) return null;
-    const monto = Number(m.monto);
-    if (!Number.isFinite(monto) || monto <= 0 || !esFechaISO(m.fecha)) return null;
-    const cuentaId = String(m.cuentaId);
-    if (!idsCuentas.has(cuentaId)) return null;
-    const esTransferencia = m.tipo === 'transferencia';
-    const destino = esTransferencia ? String(m.cuentaDestinoId) : null;
-    if (esTransferencia && (!idsCuentas.has(destino) || destino === cuentaId)) return null;
-    const cat = !esTransferencia && m.categoriaId != null ? categoriasPorId.get(String(m.categoriaId)) : null;
-    return {
-        id: String(m.id ?? generarId()),
-        descripcion: m.descripcion.trim(),
-        monto,
-        tipo: m.tipo,
-        fecha: m.fecha,
-        cuentaId,
-        cuentaDestinoId: destino,
-        categoriaId: cat && cat.tipo === m.tipo ? cat.id : null,
-        recurrenteId: idsRecurrentes.has(String(m.recurrenteId)) ? String(m.recurrenteId) : null,
-        creado: Number(m.creado) || 0
-    };
-}
-
-function normalizarRecurrente(r, idsCuentas, categoriasPorId) {
-    if (!r || !FRECUENCIAS.includes(r.frecuencia)) return null;
-    const base = normalizarMovimiento({ ...r, fecha: r.inicio }, idsCuentas, categoriasPorId);
-    if (!base) return null;
-    const { fecha, recurrenteId, creado, ...plantilla } = base;
-    return {
-        ...plantilla,
-        inicio: fecha,
-        frecuencia: r.frecuencia,
-        ultima: esFechaISO(r.ultima) ? r.ultima : null
-    };
-}
-
-// Valida un respaldo completo. Lanza un Error con un mensaje para el usuario si no sirve;
-// los registros sueltos inválidos se descartan y se informan en "descartados".
-function validarRespaldo(datos) {
-    if (!datos || typeof datos !== 'object' ||
-        !Array.isArray(datos.cuentas) || !Array.isArray(datos.categorias) || !Array.isArray(datos.movimientos)) {
-        throw new Error('El archivo no es un respaldo de Walletera.');
-    }
-    const cuentasValidas = datos.cuentas.map(normalizarCuenta).filter(Boolean);
-    const categoriasValidas = datos.categorias.map(normalizarCategoria).filter(Boolean);
-    const idsCuentas = new Set(cuentasValidas.map(c => c.id));
-    const categoriasPorId = new Map(categoriasValidas.map(c => [c.id, c]));
-    // Los respaldos anteriores a los recurrentes no traen esa lista.
-    const recurrentesValidos = (Array.isArray(datos.recurrentes) ? datos.recurrentes : [])
-        .map(r => normalizarRecurrente(r, idsCuentas, categoriasPorId))
-        .filter(Boolean);
-    const idsRecurrentes = new Set(recurrentesValidos.map(r => r.id));
-    const movimientosValidos = datos.movimientos
-        .map(m => normalizarMovimiento(m, idsCuentas, categoriasPorId, idsRecurrentes))
-        .filter(Boolean);
-    return {
-        cuentas: cuentasValidas,
-        categorias: categoriasValidas,
-        movimientos: movimientosValidos,
-        recurrentes: recurrentesValidos,
-        descartados: datos.movimientos.length - movimientosValidos.length
-    };
-}
-
 function reemplazarDatos(datos) {
     const validos = validarRespaldo(datos);
     cuentas = validos.cuentas;
@@ -497,7 +350,7 @@ function calcularSaldoCuenta(cuenta) {
     return movimientos.reduce((saldo, m) => {
         if (m.cuentaId === cuenta.id) saldo += m.tipo === 'ingreso' ? m.monto : -m.monto;
         if (m.tipo === 'transferencia' && m.cuentaDestinoId === cuenta.id) saldo += m.monto;
-        return saldo;
+        return redondearCentavos(saldo);
     }, cuenta.saldoInicial);
 }
 
@@ -506,7 +359,7 @@ function obtenerCuentasConSaldo() {
 }
 
 function calcularSaldoTotal() {
-    return obtenerCuentasConSaldo().reduce((acc, c) => acc + c.saldo, 0);
+    return obtenerCuentasConSaldo().reduce((acc, c) => redondearCentavos(acc + c.saldo), 0);
 }
 
 // ===== Categorías =====
@@ -518,18 +371,24 @@ function obtenerCategoriaPorId(id) {
     return categorias.find(c => c.id === String(id));
 }
 
-function crearCategoria({ nombre, icono, color, presupuesto, tipo }) {
-    const nueva = normalizarCategoria({ id: generarId(), nombre, icono, color, presupuesto, tipo });
+// El presupuesto se fija desde el mes que se está viendo: los meses anteriores conservan el suyo.
+function crearCategoria({ nombre, icono, color, presupuesto = 0, tipo }, periodo = periodoActual()) {
+    const presupuestos = conPresupuesto([], periodo, Number(presupuesto) || 0);
+    const nueva = normalizarCategoria({ id: generarId(), nombre, icono, color, tipo, presupuestos });
     categorias.push(nueva);
     guardarCategorias();
     return nueva;
 }
 
 // El tipo de una categoría no cambia al editarla: sus movimientos ya son de ese tipo.
-function editarCategoria(id, { nombre, icono, color, presupuesto }) {
+function editarCategoria(id, { nombre, icono, color, presupuesto }, periodo = periodoActual()) {
     const cat = obtenerCategoriaPorId(id);
     if (!cat) return null;
-    Object.assign(cat, normalizarCategoria({ ...cat, nombre, icono, color, presupuesto }));
+    const monto = Number(presupuesto) || 0;
+    const presupuestos = cat.tipo === 'gasto' && monto !== presupuestoDe(cat, periodo)
+        ? conPresupuesto(cat.presupuestos, periodo, monto)
+        : cat.presupuestos;
+    Object.assign(cat, normalizarCategoria({ ...cat, nombre, icono, color, presupuestos }));
     guardarCategorias();
     return cat;
 }
@@ -563,7 +422,7 @@ function datosMovimiento({ descripcion, monto, tipo, fecha, cuentaId, cuentaDest
     const cat = !esTransferencia && categoriaId ? obtenerCategoriaPorId(categoriaId) : null;
     return {
         descripcion: descripcion.trim() || (esTransferencia ? 'Transferencia' : ''),
-        monto: Number(monto),
+        monto: redondearCentavos(Number(monto)),
         tipo,
         fecha,
         cuentaId: String(cuentaId),
@@ -603,7 +462,7 @@ function agruparPorDia(lista) {
         }
         grupo.movimientos.push(m);
         if (m.tipo !== 'transferencia') {
-            grupo.neto += m.tipo === 'ingreso' ? m.monto : -m.monto;
+            grupo.neto = redondearCentavos(grupo.neto + (m.tipo === 'ingreso' ? m.monto : -m.monto));
             grupo.soloTransferencias = false;
         }
     });
@@ -613,37 +472,15 @@ function agruparPorDia(lista) {
 // ===== Recurrentes =====
 // Un recurrente es una plantilla de movimiento con frecuencia. Cada vez que se abre
 // la app se registran las ocurrencias vencidas hasta hoy; "ultima" evita duplicarlas.
-const FRECUENCIAS = ['mensual', 'semanal'];
-const MAX_OCURRENCIAS_POR_CARGA = 120;
-
-// Las mensuales mantienen el día de inicio y se ajustan al último día de los meses cortos.
-function fechaSiguiente(r, fechaISO) {
-    const fecha = desdeFechaISO(fechaISO);
-    if (r.frecuencia === 'semanal') {
-        fecha.setDate(fecha.getDate() + 7);
-        return aFechaISO(fecha);
-    }
-    const diaBase = Number(r.inicio.slice(8, 10));
-    const siguiente = new Date(fecha.getFullYear(), fecha.getMonth() + 1, 1);
-    const ultimoDia = new Date(siguiente.getFullYear(), siguiente.getMonth() + 1, 0).getDate();
-    siguiente.setDate(Math.min(diaBase, ultimoDia));
-    return aFechaISO(siguiente);
-}
-
-const proximaFecha = r => (r.ultima ? fechaSiguiente(r, r.ultima) : r.inicio);
-
 function generarRecurrentes(hasta = fechaHoy()) {
     let generados = 0;
     recurrentes.forEach(r => {
-        let fecha = proximaFecha(r);
-        let vueltas = 0;
-        while (fecha <= hasta && vueltas++ < MAX_OCURRENCIAS_POR_CARGA) {
-            const { id, inicio, frecuencia, ultima, ...plantilla } = r;
+        const { id, inicio, frecuencia, ultima, ...plantilla } = r;
+        ocurrenciasPendientes(r, hasta).forEach(fecha => {
             movimientos.push({ ...plantilla, id: generarId(), fecha, recurrenteId: id, creado: Date.now() + generados });
             r.ultima = fecha;
             generados++;
-            fecha = fechaSiguiente(r, fecha);
-        }
+        });
     });
     if (generados) {
         guardarMovimientos();
@@ -675,14 +512,7 @@ function editarRecurrente(id, datos, frecuencia) {
     const r = obtenerRecurrentePorId(id);
     if (!r) return null;
     const { fecha, ...plantilla } = datosMovimiento(datos);
-    if (r.ultima && fecha <= r.ultima) {
-        throw new Error('La próxima fecha tiene que ser posterior a la última registrada.');
-    }
-    Object.assign(r, plantilla, { frecuencia });
-    if (fecha !== proximaFecha(r)) {
-        r.inicio = fecha;
-        r.ultima = null;
-    }
+    Object.assign(r, aplicarEdicionRecurrente(r, plantilla, fecha, frecuencia));
     guardarRecurrentes();
     generarRecurrentes();
     return r;
@@ -719,7 +549,7 @@ function movimientosDelPeriodo(periodo) {
     return movimientos.filter(m => m.fecha.startsWith(periodo));
 }
 
-const sumar = lista => lista.reduce((acc, m) => acc + m.monto, 0);
+const sumar = lista => lista.reduce((acc, m) => redondearCentavos(acc + m.monto), 0);
 
 function totalPorTipo(periodo, tipo) {
     return sumar(movimientosDelPeriodo(periodo).filter(m => m.tipo === tipo));
@@ -728,11 +558,11 @@ function totalPorTipo(periodo, tipo) {
 function calcularResumen(periodo) {
     const ingresos = totalPorTipo(periodo, 'ingreso');
     const gastos = totalPorTipo(periodo, 'gasto');
-    const presupuesto = obtenerCategorias('gasto').reduce((acc, c) => acc + c.presupuesto, 0);
+    const presupuesto = obtenerCategorias('gasto').reduce((acc, c) => redondearCentavos(acc + presupuestoDe(c, periodo)), 0);
     return {
         ingresos,
         gastos,
-        resultado: ingresos - gastos,
+        resultado: redondearCentavos(ingresos - gastos),
         presupuesto,
         porcentajePresupuesto: presupuesto > 0 ? (gastos / presupuesto) * 100 : 0,
         cantidad: movimientosDelPeriodo(periodo).length
@@ -766,14 +596,15 @@ function calcularMontoPorCategoria(tipo, periodo) {
         .filter(m => m.tipo === tipo)
         .forEach(m => {
             const clave = m.categoriaId && obtenerCategoriaPorId(m.categoriaId) ? m.categoriaId : null;
-            montos.set(clave, (montos.get(clave) ?? 0) + m.monto);
+            montos.set(clave, redondearCentavos((montos.get(clave) ?? 0) + m.monto));
         });
     return montos;
 }
 
+// Cada categoría con lo movido en el período y el presupuesto vigente ese mes.
 function obtenerCategoriasConMonto(tipo, periodo) {
     const montos = calcularMontoPorCategoria(tipo, periodo);
-    return obtenerCategorias(tipo).map(c => ({ ...c, monto: montos.get(c.id) ?? 0 }));
+    return obtenerCategorias(tipo).map(c => ({ ...c, monto: montos.get(c.id) ?? 0, presupuesto: presupuestoDe(c, periodo) }));
 }
 
 function obtenerCategoriaMasGastada(periodo) {
@@ -842,7 +673,7 @@ export {
     obtenerGruposIconos, primerIcono,
     obtenerCuentas, obtenerCuentaPorId, crearCuenta, editarCuenta, eliminarCuenta,
     contarMovimientosDeCuenta, contarRecurrentesDeCuenta, obtenerCuentasConSaldo, calcularSaldoTotal,
-    obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria,
+    obtenerCategorias, obtenerCategoriaPorId, crearCategoria, editarCategoria, eliminarCategoria, presupuestoDe,
     obtenerMovimientos, obtenerMovimientoPorId, crearMovimiento, editarMovimiento, eliminarMovimiento,
     buscarYFiltrar, agruparPorDia,
     obtenerRecurrentes, obtenerRecurrentePorId, crearRecurrente, editarRecurrente, eliminarRecurrente,

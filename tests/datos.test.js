@@ -26,7 +26,7 @@ describe('primera carga', () => {
         expect(d.obtenerCategorias('ingreso')).toHaveLength(5);
         expect(d.obtenerCategorias().every(c => c.icono.startsWith('ph-') && c.color)).toBe(true);
         expect(d.obtenerCuentas()).toMatchObject([{ nombre: 'Efectivo', tipo: 'efectivo', saldoInicial: 0 }]);
-        expect(localStorage.getItem('walletera_version')).toBe('5');
+        expect(localStorage.getItem('walletera_version')).toBe('6');
     });
 });
 
@@ -119,6 +119,54 @@ describe('integridad', () => {
     });
 });
 
+describe('presupuesto por mes', () => {
+    const editar = (d, cat, presupuesto, periodo) =>
+        d.editarCategoria(cat.id, { nombre: cat.nombre, icono: cat.icono, color: cat.color, presupuesto }, periodo);
+
+    it('cambiarlo en un mes no altera los meses anteriores', async () => {
+        const { d, comida } = await conDosCuentas();
+        editar(d, comida, 200000, '2026-10');
+        expect(d.presupuestoDe(comida, '2026-09')).toBe(150000);
+        expect(d.presupuestoDe(comida, '2026-10')).toBe(200000);
+        expect(d.presupuestoDe(comida, '2026-12')).toBe(200000);
+        expect(d.calcularResumen('2026-09').presupuesto).toBe(710000);
+        expect(d.calcularResumen('2026-10').presupuesto).toBe(760000);
+        const enSeptiembre = d.obtenerCategoriasConMonto('gasto', '2026-09').find(c => c.id === comida.id);
+        expect(enSeptiembre.presupuesto).toBe(150000);
+    });
+
+    it('editar solo el nombre no agrega una vigencia nueva', async () => {
+        const { d, comida } = await conDosCuentas();
+        d.editarCategoria(comida.id, { nombre: 'Comida', icono: comida.icono, color: comida.color, presupuesto: 150000 }, '2026-05');
+        expect(d.obtenerCategoriaPorId(comida.id)).toMatchObject({ nombre: 'Comida', presupuestos: [{ desde: '2000-01', monto: 150000 }] });
+    });
+
+    it('una categoría nueva tiene presupuesto desde el mes en que se crea', async () => {
+        const d = await cargarDatos();
+        const gym = d.crearCategoria({ nombre: 'Gimnasio', icono: 'ph-barbell', color: 'turquesa', presupuesto: 5000, tipo: 'gasto' }, '2026-10');
+        expect(d.presupuestoDe(gym, '2026-09')).toBe(0);
+        expect(d.presupuestoDe(gym, '2026-10')).toBe(5000);
+    });
+
+    it('volver al monto anterior no deja vigencias repetidas', async () => {
+        const { d, comida } = await conDosCuentas();
+        editar(d, comida, 200000, '2026-10');
+        editar(d, comida, 150000, '2026-10');
+        expect(d.obtenerCategoriaPorId(comida.id).presupuestos).toEqual([{ desde: '2000-01', monto: 150000 }]);
+    });
+});
+
+describe('montos', () => {
+    it('las sumas no acumulan error de punto flotante', async () => {
+        const { d, efectivo } = await conDosCuentas();
+        d.crearMovimiento({ descripcion: 'A', monto: 0.1, tipo: 'gasto', fecha: '2026-10-01', cuentaId: efectivo.id });
+        d.crearMovimiento({ descripcion: 'B', monto: 0.2, tipo: 'gasto', fecha: '2026-10-01', cuentaId: efectivo.id });
+        expect(d.calcularResumen('2026-10').gastos).toBe(0.3);
+        expect(d.obtenerCuentasConSaldo().find(c => c.id === efectivo.id).saldo).toBe(-0.3);
+        expect(d.agruparPorDia(d.obtenerMovimientos('2026-10'))[0].neto).toBe(-0.3);
+    });
+});
+
 describe('migraciones', () => {
     it('v2: corrige las fechas guardadas en UTC y convierte el fondo en una cuenta', async () => {
         const d = await cargarDatos({
@@ -144,6 +192,19 @@ describe('migraciones', () => {
     it('v1: descarta datos que no son de Walletera y vuelve a sembrar', async () => {
         const d = await cargarDatos({ walletera_categorias: [{ id: 1, name: 'Leanne Graham' }] });
         expect(d.obtenerCategorias()).toHaveLength(15);
+    });
+
+    it('v5: el presupuesto único pasa a regir desde siempre y se guarda un respaldo', async () => {
+        const d = await cargarDatos({
+            walletera_version: '5',
+            walletera_cuentas: [{ id: 'c1', nombre: 'Banco', tipo: 'banco', saldoInicial: 0 }],
+            walletera_categorias: [{ id: 'a', nombre: 'Comida', icono: 'ph-fork-knife', color: 'naranja', presupuesto: 100, tipo: 'gasto' }],
+            walletera_movimientos: [{ id: 'm', descripcion: 'Super', monto: 50, tipo: 'gasto', fecha: '2026-10-01', cuentaId: 'c1', categoriaId: 'a', creado: 1 }]
+        });
+        expect(d.obtenerCategoriaPorId('a').presupuestos).toEqual([{ desde: '2000-01', monto: 100 }]);
+        expect(d.calcularResumen('2026-10')).toMatchObject({ presupuesto: 100, gastos: 50 });
+        expect(localStorage.getItem('walletera_version')).toBe('6');
+        expect(localStorage.getItem('walletera_respaldo_v5')).not.toBeNull();
     });
 
     it('v4: reemplaza emojis por ícono y color, con un genérico si no hay equivalente', async () => {

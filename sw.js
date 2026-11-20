@@ -2,22 +2,29 @@
 // Service worker: la app funciona sin conexión.
 // - Archivos propios: primero la red (para ver siempre la última versión), caché si no hay conexión.
 // - Recursos externos (Chart.js, tipografía): caché primero y se actualiza en segundo plano.
+// - La API (/api/) nunca pasa por la caché: son datos personales y tienen que estar al día.
 
-const CACHE = 'walletera-v2';
+const CACHE = 'walletera-v3';
 const ARCHIVOS = [
     './',
     './index.html',
     './main.js',
+    './js/api.js',
     './js/datos.js',
+    './js/dominio.js',
     './js/ejemplo.js',
+    './js/exportar.js',
+    './js/tema.js',
     './css/estilos.css',
     './categorias.json',
     './iconos.json',
     './manifest.webmanifest',
     './img/logo.svg',
     './img/favicon.svg',
+    './img/icono-180.png',
     './img/icono-192.png',
     './img/icono-512.png',
+    './img/icono-maskable-512.png',
     './vendor/phosphor/phosphor.css',
     './vendor/phosphor/Phosphor.woff2'
 ];
@@ -68,6 +75,8 @@ async function primeroLaCache(evento) {
 self.addEventListener('fetch', evento => {
     const { request } = evento;
     if (request.method !== 'GET') return;
-    const mismoOrigen = new URL(request.url).origin === self.location.origin;
+    const url = new URL(request.url);
+    const mismoOrigen = url.origin === self.location.origin;
+    if (mismoOrigen && url.pathname.startsWith('/api/')) return;
     evento.respondWith(mismoOrigen ? primeroLaRed(request) : primeroLaCache(evento));
 });

@@ -1,0 +1,18 @@
+# Postgres para desarrollo:
+#   docker compose up -d
+#   docker compose exec db createdb -U walletera walletera_test   (una vez, para los tests)
+#   npm run db:migrar
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: walletera
+      POSTGRES_PASSWORD: walletera
+      POSTGRES_DB: walletera
+    ports:
+      - "5432:5432"
+    volumes:
+      - datos:/var/lib/postgresql/data
+
+volumes:
+  datos:

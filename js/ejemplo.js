@@ -2,6 +2,8 @@
 // Genera tres meses de movimientos verosímiles para explorar la app.
 // Es determinista: la misma fecha de referencia produce siempre los mismos datos.
 
+import { PERIODO_INICIAL } from './dominio.js';
+
 // Generador pseudoaleatorio con semilla (mulberry32).
 function crearAleatorio(semilla) {
     let a = semilla >>> 0;
@@ -25,7 +27,7 @@ const PRESUPUESTOS = {
 
 export function generarDatosDeEjemplo(semilla, hoy = new Date()) {
     const categorias = semilla.map(c => (c.tipo === 'gasto' && c.nombre in PRESUPUESTOS
-        ? { ...c, presupuesto: PRESUPUESTOS[c.nombre] }
+        ? { ...c, presupuestos: PRESUPUESTOS[c.nombre] ? [{ desde: PERIODO_INICIAL, monto: PRESUPUESTOS[c.nombre] }] : [] }
         : c));
     const azar = crearAleatorio(42);
     const entre = (min, max) => Math.round((min + azar() * (max - min)) / 50) * 50;

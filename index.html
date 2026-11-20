@@ -19,14 +19,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="./vendor/phosphor/phosphor.css">
     <link rel="stylesheet" href="./css/estilos.css">
-    <script>
-        // Tema antes del primer pintado, para evitar el parpadeo. Oscuro por defecto.
-        try {
-            var tema = localStorage.getItem('walletera_tema');
-            document.documentElement.setAttribute('data-tema', tema === 'claro' ? 'claro' : 'oscuro');
-            if (localStorage.getItem('walletera_ocultar_montos') === '1') document.documentElement.classList.add('ocultar-montos');
-        } catch (e) { /* sin almacenamiento: queda el tema por defecto */ }
-    </script>
+    <script src="./js/tema.js"></script>
     <script type="module" src="./main.js"></script>
 </head>
 <body>
@@ -55,6 +48,10 @@
     </aside>
 
     <main class="principal" id="principal">
+        <div class="banner" id="bannerSinConexion" role="status" hidden>
+            <i class="ph ph-wifi-slash" aria-hidden="true"></i>
+            <span>Sin conexión: estás viendo los últimos datos guardados. Para cargar o cambiar algo necesitás internet.</span>
+        </div>
         <!-- ===== Inicio ===== -->
         <section class="seccion activa" id="inicio" aria-labelledby="saludo">
             <header class="saludo">
@@ -158,16 +155,54 @@
                     <button class="btn-icono" type="button" id="btnBuscar" aria-label="Buscar" aria-expanded="false" aria-controls="campoBuscar">
                         <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
                     </button>
+                    <button class="btn-icono" type="button" id="btnDescargar" aria-label="Descargar en Excel o PDF">
+                        <i class="ph ph-download-simple" aria-hidden="true"></i>
+                    </button>
                 </div>
             </header>
             <label class="buscador" id="campoBuscar" hidden>
                 <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
                 <input type="search" id="buscador" placeholder="Buscar por descripción" aria-label="Buscar movimientos">
             </label>
-            <div class="periodo" role="group" aria-label="Período">
+            <section class="tarjeta panel-rango" id="panelRango" aria-labelledby="tituloRango" hidden>
+                <h2 class="visualmente-oculto" id="tituloRango">Elegir fechas</h2>
+                <div class="dos-columnas">
+                    <label class="campo">
+                        <span>Desde</span>
+                        <input type="date" id="rangoDesde">
+                    </label>
+                    <label class="campo">
+                        <span>Hasta</span>
+                        <input type="date" id="rangoHasta">
+                    </label>
+                </div>
+                <div class="chips" role="group" aria-label="Atajos de fechas">
+                    <button class="chip" type="button" data-atajo="mes">Este mes</button>
+                    <button class="chip" type="button" data-atajo="mes-anterior">Mes anterior</button>
+                    <button class="chip" type="button" data-atajo="tres-meses">Últimos 3 meses</button>
+                    <button class="chip" type="button" data-atajo="anio">Este año</button>
+                </div>
+                <div class="formulario-acciones">
+                    <button class="btn btn-texto" type="button" id="btnQuitarRango">Volver al mes</button>
+                    <button class="btn btn-primario" type="button" id="btnAplicarRango">Ver movimientos</button>
+                </div>
+            </section>
+            <div class="periodo" id="periodoMovimientos" role="group" aria-label="Período">
                 <button class="periodo-btn" type="button" data-periodo="-1" aria-label="Mes anterior"><i class="ph ph-caret-left" aria-hidden="true"></i></button>
-                <span class="periodo-nombre" data-periodo-nombre aria-live="polite"></span>
+                <button class="periodo-elegir" type="button" id="btnRango" aria-expanded="false" aria-controls="panelRango">
+                    <span class="periodo-nombre" data-periodo-nombre aria-live="polite"></span>
+                    <span class="visualmente-oculto">. Elegir fechas</span>
+                    <i class="ph ph-calendar-dots" aria-hidden="true"></i>
+                </button>
                 <button class="periodo-btn" type="button" data-periodo="1" aria-label="Mes siguiente"><i class="ph ph-caret-right" aria-hidden="true"></i></button>
+            </div>
+            <div class="rango-activo" id="rangoActivo" hidden>
+                <button class="rango-editar" type="button" id="btnEditarRango" aria-expanded="false" aria-controls="panelRango">
+                    <i class="ph ph-calendar-dots" aria-hidden="true"></i>
+                    <span class="rango-texto" id="rangoTexto" aria-live="polite"></span>
+                    <span class="visualmente-oculto">. Cambiar fechas</span>
+                </button>
+                <button class="periodo-btn" type="button" id="btnLimpiarRango" aria-label="Quitar las fechas y volver al mes"><i class="ph ph-x" aria-hidden="true"></i></button>
             </div>
             <div class="dos-columnas">
                 <div class="tarjeta dato"><span class="dato-label">Ingresos</span><span class="dato-valor positivo monto" id="movIngresos"></span></div>
@@ -264,6 +299,11 @@
             <header class="encabezado">
                 <h1 id="tituloAjustes">Ajustes</h1>
             </header>
+            <section class="ajustes-grupo" id="grupoUsuario" aria-labelledby="tituloUsuario" hidden>
+                <h2 class="ajustes-titulo" id="tituloUsuario">Tu usuario</h2>
+                <p class="texto-suave" id="textoUsuario"></p>
+                <ul class="lista tarjeta" id="opcionesUsuario"></ul>
+            </section>
             <section class="ajustes-grupo" aria-labelledby="tituloApariencia">
                 <h2 class="ajustes-titulo" id="tituloApariencia">Apariencia</h2>
                 <ul class="lista tarjeta">
@@ -278,9 +318,9 @@
             </section>
             <section class="ajustes-grupo" aria-labelledby="tituloDatos">
                 <h2 class="ajustes-titulo" id="tituloDatos">Tus datos</h2>
-                <p class="texto-suave">Walletera guarda todo en este navegador: nada sale de tu dispositivo. Descargá un respaldo de vez en cuando.</p>
+                <p class="texto-suave" id="textoDatos">Walletera guarda todo en este navegador: nada sale de tu dispositivo. Descargá un respaldo de vez en cuando.</p>
                 <ul class="lista tarjeta">
-                    <li>
+                    <li data-solo-local>
                         <button class="fila" type="button" data-cargar-ejemplo>
                             <span class="icono-tile tono-verde"><i class="ph ph-sparkle" aria-hidden="true"></i></span>
                             <span class="fila-texto"><span class="fila-nombre">Cargar datos de ejemplo</span><span class="fila-meta">Tres meses de movimientos para explorar la app</span></span>
@@ -289,7 +329,7 @@
                     <li>
                         <button class="fila" type="button" id="btnExportarCSV">
                             <span class="icono-tile tono-azul"><i class="ph ph-file-csv" aria-hidden="true"></i></span>
-                            <span class="fila-texto"><span class="fila-nombre">Exportar movimientos</span><span class="fila-meta">CSV para Excel o Google Sheets</span></span>
+                            <span class="fila-texto"><span class="fila-nombre">Exportar todos los movimientos</span><span class="fila-meta">CSV para Excel o Google Sheets. Para un período, usá Descargar en Movimientos</span></span>
                         </button>
                     </li>
                     <li>
@@ -437,7 +477,8 @@
             </div>
             <label class="campo" id="campoPresupuesto">
                 <span>Presupuesto mensual</span>
-                <input type="number" id="categoriaPresupuesto" placeholder="0" min="0" step="0.01" inputmode="decimal">
+                <input type="number" id="categoriaPresupuesto" placeholder="0" min="0" step="0.01" inputmode="decimal" aria-describedby="ayudaPresupuesto">
+                <small class="campo-ayuda" id="ayudaPresupuesto"></small>
             </label>
             <div class="campo">
                 <span id="etiquetaColor">Color</span>
@@ -452,6 +493,94 @@
                 <button class="btn btn-primario" type="submit">Guardar</button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- ===== Acceso: ingresar o crear el usuario de la casa ===== -->
+<div class="modal" id="modalAcceso" aria-hidden="true">
+    <div class="modal-fondo" data-cerrar="modalAcceso"></div>
+    <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="tituloAcceso">
+        <header class="modal-encabezado">
+            <h2 id="tituloAcceso">Ingresar</h2>
+            <button class="btn-icono" type="button" data-cerrar="modalAcceso" aria-label="Cerrar"><i class="ph ph-x" aria-hidden="true"></i></button>
+        </header>
+        <form class="formulario" id="formAcceso" novalidate>
+            <p class="aviso" id="motivoAcceso" role="alert" hidden></p>
+            <div class="segmentado segmentado-dos" id="pestanasAcceso" role="group" aria-label="Ingresar o crear usuario" hidden>
+                <button type="button" class="segmento activa" data-acceso="ingresar" aria-pressed="true">Ingresar</button>
+                <button type="button" class="segmento" data-acceso="registrar" aria-pressed="false">Crear usuario</button>
+            </div>
+            <label class="campo">
+                <span>Email</span>
+                <input type="email" id="accesoEmail" autocomplete="username" inputmode="email" maxlength="254" required>
+            </label>
+            <label class="campo">
+                <span>Contraseña</span>
+                <input type="password" id="accesoClave" autocomplete="current-password" maxlength="200" required>
+            </label>
+            <label class="campo" id="campoCodigo" hidden>
+                <span>Código de registro</span>
+                <input type="text" id="accesoCodigo" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="ayudaCodigo">
+                <small class="campo-ayuda" id="ayudaCodigo">El que configuraste en Vercel como CODIGO_REGISTRO.</small>
+            </label>
+            <p class="campo-ayuda">Un solo usuario para la casa: ingresá con el mismo email y contraseña en cada dispositivo y todos van a ver y cargar los mismos datos.</p>
+            <div class="formulario-acciones">
+                <button class="btn btn-texto" type="button" id="btnUsarSinCuenta" hidden>Usar sin cuenta</button>
+                <button class="btn btn-primario" type="submit" id="btnAcceso">Ingresar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===== Cambiar contraseña ===== -->
+<div class="modal" id="modalClave" aria-hidden="true">
+    <div class="modal-fondo" data-cerrar="modalClave"></div>
+    <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="tituloClave">
+        <header class="modal-encabezado">
+            <h2 id="tituloClave">Cambiar contraseña</h2>
+            <button class="btn-icono" type="button" data-cerrar="modalClave" aria-label="Cerrar"><i class="ph ph-x" aria-hidden="true"></i></button>
+        </header>
+        <form class="formulario" id="formClave" novalidate>
+            <input type="text" autocomplete="username" hidden aria-hidden="true" tabindex="-1">
+            <label class="campo">
+                <span>Contraseña actual</span>
+                <input type="password" id="claveActual" autocomplete="current-password" maxlength="200">
+            </label>
+            <label class="campo">
+                <span>Contraseña nueva</span>
+                <input type="password" id="claveNueva" autocomplete="new-password" minlength="8" maxlength="200" aria-describedby="ayudaClaveNueva">
+                <small class="campo-ayuda" id="ayudaClaveNueva">Al menos 8 caracteres. Los demás dispositivos van a tener que ingresar de nuevo.</small>
+            </label>
+            <label class="campo">
+                <span>Repetí la contraseña nueva</span>
+                <input type="password" id="claveRepetida" autocomplete="new-password" maxlength="200">
+            </label>
+            <div class="formulario-acciones">
+                <button class="btn btn-primario" type="submit">Cambiar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===== Descargar movimientos ===== -->
+<div class="modal modal-dialogo" id="modalDescargar" aria-hidden="true">
+    <div class="modal-fondo" data-cerrar="modalDescargar"></div>
+    <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="tituloDescargar" aria-describedby="detalleDescargar">
+        <h2 id="tituloDescargar">Descargar movimientos</h2>
+        <p class="texto-suave" id="detalleDescargar"></p>
+        <div class="opciones-descarga">
+            <button class="fila" type="button" data-descargar="xlsx">
+                <span class="icono-tile tono-verde"><i class="ph ph-file-xls" aria-hidden="true"></i></span>
+                <span class="fila-texto"><span class="fila-nombre">Excel (.xlsx)</span><span class="fila-meta">Para ordenar, filtrar y sumar</span></span>
+            </button>
+            <button class="fila" type="button" data-descargar="pdf">
+                <span class="icono-tile tono-rosa"><i class="ph ph-file-pdf" aria-hidden="true"></i></span>
+                <span class="fila-texto"><span class="fila-nombre">PDF</span><span class="fila-meta">Para imprimir o compartir</span></span>
+            </button>
+        </div>
+        <div class="formulario-acciones">
+            <button class="btn btn-secundario" type="button" data-cerrar="modalDescargar">Cancelar</button>
+        </div>
     </div>
 </div>
 

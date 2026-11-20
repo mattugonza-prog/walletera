@@ -18,7 +18,11 @@ const tipos = {
 
 export function crearPool(url = process.env.DATABASE_URL) {
     if (!url) return null;
-    return new pg.Pool({ connectionString: url, max: 5, idleTimeoutMillis: 10_000, types: tipos });
+    const pool = new pg.Pool({ connectionString: url, max: 5, idleTimeoutMillis: 10_000, types: tipos });
+    // Neon cierra las conexiones inactivas cuando suspende la base. Sin este manejador, pg
+    // emitiría un "error" sin escuchar y el proceso se caería; así solo se descarta esa conexión.
+    pool.on('error', error => console.error('Se cerró una conexión inactiva con la base:', error.message));
+    return pool;
 }
 
 // Ejecuta `fn(cliente)` dentro de una transacción: si algo falla, no queda nada a medias.

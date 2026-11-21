@@ -69,7 +69,7 @@ function fechaExcel(fechaISO) {
 const FORMATO_MONTO = '#,##0.00';
 const negrita = value => ({ value, fontWeight: 'bold' });
 const celdaMonto = value => ({ value, type: Number, format: FORMATO_MONTO });
-const ENCABEZADOS_EXCEL = ['Fecha', 'Tipo', 'Descripción', 'Categoría', 'Cuenta', 'Cuenta destino', 'Monto'];
+const ENCABEZADOS_EXCEL = ['Fecha', 'Tipo', 'Descripción', 'Categoría', 'Cuenta', 'Cuenta destino', 'Monto', 'ID'];
 
 export function armarHojasExcel(datos) {
     const encabezado = ENCABEZADOS_EXCEL.map(value => ({ value, fontWeight: 'bold', backgroundColor: '#E2E5DF' }));
@@ -80,7 +80,8 @@ export function armarHojasExcel(datos) {
         categoriaDeFila(f) || null,
         f.cuenta || null,
         f.cuentaDestino || null,
-        celdaMonto(f.monto)
+        celdaMonto(f.monto),
+        f.id
     ]);
 
     const { totales, categorias } = datos;
@@ -108,7 +109,7 @@ export function armarHojasExcel(datos) {
         {
             sheet: 'Movimientos',
             data: [encabezado, ...filas],
-            columns: [{ width: 12 }, { width: 14 }, { width: 38 }, { width: 20 }, { width: 18 }, { width: 18 }, { width: 15 }],
+            columns: [{ width: 12 }, { width: 14 }, { width: 38 }, { width: 20 }, { width: 18 }, { width: 18 }, { width: 15 }, { width: 38 }],
             stickyRowsCount: 1
         },
         {

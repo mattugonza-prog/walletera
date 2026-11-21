@@ -3,10 +3,10 @@ import { armarHojasExcel, armarContenidoPDF } from '../js/exportar.js';
 
 const datos = {
     filas: [
-        { fecha: '2026-09-15', tipo: 'gasto', tipoNombre: 'Gasto', descripcion: 'Super', categoria: 'Alimentación', cuenta: 'Efectivo', cuentaDestino: '', monto: -1550.5 },
-        { fecha: '2026-10-01', tipo: 'ingreso', tipoNombre: 'Ingreso', descripcion: 'Sueldo', categoria: 'Sueldo', cuenta: 'Banco', cuentaDestino: '', monto: 1250000 },
-        { fecha: '2026-10-05', tipo: 'transferencia', tipoNombre: 'Transferencia', descripcion: 'Transferencia', categoria: '', cuenta: 'Banco', cuentaDestino: 'Mercado Pago', monto: 300 },
-        { fecha: '2026-11-10', tipo: 'gasto', tipoNombre: 'Gasto', descripcion: '=HYPERLINK("x")', categoria: '', cuenta: 'Efectivo', cuentaDestino: '', monto: -50 }
+        { id: '3f2b8c1e-9a4d-4c7e-b2f1-7d0e5a6c9b12', fecha: '2026-09-15', tipo: 'gasto', tipoNombre: 'Gasto', descripcion: 'Super', categoria: 'Alimentación', cuenta: 'Efectivo', cuentaDestino: '', monto: -1550.5 },
+        { id: 'a71c0d52-6e8f-4b39-8d24-1f6e0c9b7a35', fecha: '2026-10-01', tipo: 'ingreso', tipoNombre: 'Ingreso', descripcion: 'Sueldo', categoria: 'Sueldo', cuenta: 'Banco', cuentaDestino: '', monto: 1250000 },
+        { id: 'mhx3k2a1-4f9qz8ab', fecha: '2026-10-05', tipo: 'transferencia', tipoNombre: 'Transferencia', descripcion: 'Transferencia', categoria: '', cuenta: 'Banco', cuentaDestino: 'Mercado Pago', monto: 300 },
+        { id: '20261110', fecha: '2026-11-10', tipo: 'gasto', tipoNombre: 'Gasto', descripcion: '=HYPERLINK("x")', categoria: '', cuenta: 'Efectivo', cuentaDestino: '', monto: -50 }
     ],
     totales: { ingresos: 1250000, gastos: 1600.5, resultado: 1248399.5, cantidad: 4 },
     categorias: [{ nombre: 'Alimentación', monto: 1550.5, porcentaje: 96.876 }, { nombre: 'Sin categoría', monto: 50, porcentaje: 3.124 }],
@@ -21,9 +21,15 @@ describe('Excel', () => {
     it('tiene la hoja de movimientos con encabezado fijo y en negrita', () => {
         expect(movimientos.sheet).toBe('Movimientos');
         expect(movimientos.stickyRowsCount).toBe(1);
-        expect(movimientos.data[0].map(c => c.value)).toEqual(['Fecha', 'Tipo', 'Descripción', 'Categoría', 'Cuenta', 'Cuenta destino', 'Monto']);
+        expect(movimientos.data[0].map(c => c.value)).toEqual(['Fecha', 'Tipo', 'Descripción', 'Categoría', 'Cuenta', 'Cuenta destino', 'Monto', 'ID']);
         expect(movimientos.data[0].every(c => c.fontWeight === 'bold')).toBe(true);
         expect(movimientos.data).toHaveLength(5);
+    });
+
+    it('termina cada fila con el id del movimiento, como texto', () => {
+        expect(movimientos.data.slice(1).map(fila => fila.at(-1))).toEqual([
+            '3f2b8c1e-9a4d-4c7e-b2f1-7d0e5a6c9b12', 'a71c0d52-6e8f-4b39-8d24-1f6e0c9b7a35', 'mhx3k2a1-4f9qz8ab', '20261110'
+        ]);
     });
 
     it('guarda fechas reales a medianoche UTC y montos como número', () => {

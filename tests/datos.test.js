@@ -167,6 +167,20 @@ describe('rango de fechas', () => {
             ['2026-11-10', 'Gasto', -50.5, '', 'Efectivo', '']
         ]);
     });
+
+    it('cada fila lleva el id de su movimiento, para quitar duplicados al juntar descargas', async () => {
+        const d = await cargarDatos();
+        await d.reemplazarDatos({
+            cuentas: [{ id: 'caja', nombre: 'Caja', tipo: 'efectivo', saldoInicial: 0 }],
+            categorias: [],
+            movimientos: [
+                { id: 'mov-uno', descripcion: 'Uno', monto: 10, tipo: 'gasto', fecha: '2026-10-01', cuentaId: 'caja' },
+                { id: 'mov-dos', descripcion: 'Dos', monto: 20, tipo: 'ingreso', fecha: '2026-10-02', cuentaId: 'caja' }
+            ]
+        });
+        const filas = d.filasParaExportar(d.obtenerMovimientosEntre({ desde: '2026-10-01', hasta: '2026-10-31' }));
+        expect(filas.map(f => [f.descripcion, f.id])).toEqual([['Dos', 'mov-dos'], ['Uno', 'mov-uno']]);
+    });
 });
 
 describe('presupuesto por mes', () => {
@@ -305,10 +319,10 @@ describe('respaldo y exportación', () => {
 
     it('exporta CSV para Excel en español y neutraliza fórmulas', async () => {
         const { d, efectivo } = await conDosCuentas();
-        await d.crearMovimiento({ descripcion: '=HYPERLINK("x")', monto: 1550.5, tipo: 'gasto', fecha: '2026-10-10', cuentaId: efectivo.id });
+        const m = await d.crearMovimiento({ descripcion: '=HYPERLINK("x")', monto: 1550.5, tipo: 'gasto', fecha: '2026-10-10', cuentaId: efectivo.id });
         const [encabezado, fila] = d.exportarCSV().split('\r\n');
-        expect(encabezado).toBe('Fecha;Tipo;Descripción;Monto;Cuenta;Cuenta destino;Categoría');
-        expect(fila).toBe('2026-10-10;Gasto;"\'=HYPERLINK(""x"")";-1550,50;Efectivo;;');
+        expect(encabezado).toBe('Fecha;Tipo;Descripción;Monto;Cuenta;Cuenta destino;Categoría;ID');
+        expect(fila).toBe(`2026-10-10;Gasto;"'=HYPERLINK(""x"")";-1550,50;Efectivo;;;${m.id}`);
     });
 });
 

@@ -26,6 +26,7 @@ Billetera para ordenar la plata de la casa: cuentas, transferencias, presupuesto
 - **Entre dos fechas**: además de mes a mes, la lista de movimientos se puede ver para cualquier rango ("Desde" y "Hasta", con atajos como "Últimos 3 meses").
 - **Descarga en Excel y PDF** de lo que se ve en pantalla (rango, tipo y búsqueda):
   - el Excel trae fechas y montos como valores reales, para ordenar y sumar, y una hoja de resumen con el gasto por categoría;
+  - el Excel y el CSV terminan con el ID de cada movimiento (no cambia al editarlo), para quitar duplicados al juntar descargas en una planilla;
   - el PDF es un reporte A4 listo para imprimir.
 - **Recurrentes**: alquiler, sueldo, suscripciones. Se registran solos cada mes o cada semana, incluso los que vencieron mientras la app estaba cerrada, y en Inicio aparecen los próximos vencimientos.
 - **Presupuestos mensuales** por categoría, con lo que queda o lo que se excedió. Cambiar un presupuesto (por ejemplo, por inflación) rige desde ese mes: los meses anteriores conservan el suyo.

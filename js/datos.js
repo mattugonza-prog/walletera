@@ -359,9 +359,10 @@ function exportarCSV() {
         f.monto.toFixed(2).replace('.', ','),
         texto(f.cuenta),
         texto(f.cuentaDestino),
-        texto(f.categoria)
+        texto(f.categoria),
+        f.id
     ]);
-    const encabezado = ['Fecha', 'Tipo', 'Descripción', 'Monto', 'Cuenta', 'Cuenta destino', 'Categoría'];
+    const encabezado = ['Fecha', 'Tipo', 'Descripción', 'Monto', 'Cuenta', 'Cuenta destino', 'Categoría', 'ID'];
     return [encabezado, ...filas].map(fila => fila.map(celda).join(';')).join('\r\n');
 }
 
@@ -787,11 +788,13 @@ function resumenPorCategoria(lista, tipo = 'gasto') {
 
 // ===== Exportación =====
 // Filas planas para CSV, Excel y PDF. El monto lleva signo: los gastos van en negativo.
+// El id no cambia aunque se edite el movimiento: sirve para quitar duplicados al juntar descargas.
 const NOMBRES_TIPO = { gasto: 'Gasto', ingreso: 'Ingreso', transferencia: 'Transferencia' };
 
 function filasParaExportar(lista) {
     const nombreCuenta = id => obtenerCuentaPorId(id)?.nombre ?? '';
     return lista.map(m => ({
+        id: m.id,
         fecha: m.fecha,
         tipo: m.tipo,
         tipoNombre: NOMBRES_TIPO[m.tipo],
